@@ -1,0 +1,10 @@
+배경음악 출처 (모두 CC0 - 출처 표기 의무 없음, 상업적 이용 가능)
+=================================================================
+lobby.mp3   "PYNCHON"                  cinameng (James Gargette)   https://opengameart.org/content/pynchon
+night.mp3   "Mirrorshade" 1~5 이어붙임  cinameng (James Gargette)   https://opengameart.org/content/mirrorshade
+talk.mp3    "jazz improvisation looped" Pro Sensory (Alex McCulloch) https://opengameart.org/content/jazz-improvisation-looped
+vote.mp3    "Tension Theme"            Umplix                      https://opengameart.org/content/tension-theme
+casino.mp3  "Bossa Nova" (8bit Bossa)  Joth                        https://opengameart.org/content/bossa-nova
+
+손질한 내용: 앞뒤 무음 자르기, 반복 이음매 8ms 크로스페이드, 음량 맞추기, 160kbps mp3로 변환
+곡을 바꾸려면 같은 이름의 mp3로 덮어쓰고, public/sound.js 의 TRACKS 에 반복 길이(초)를 적어 주세요.

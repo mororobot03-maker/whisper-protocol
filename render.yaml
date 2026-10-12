@@ -1,0 +1,11 @@
+# Render 블루프린트: 이 파일이 있으면 Render가 설정을 알아서 채워 줌
+services:
+  - type: web
+    name: whisper-protocol
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: MIN_PLAYERS
+        value: "4"

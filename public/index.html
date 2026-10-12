@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>위스퍼 프로토콜</title>
+  <!-- 갈무리: 픽셀 느낌 한글 글꼴 (선내 방송, 큰 제목에만 사용) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/galmuri/dist/galmuri.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <!-- 입장·로비 화면 오른쪽 위: 음악 / 효과음 켜고 끄기 (게임 중에는 HUD에 같은 버튼) -->
+    <div class="corner-audio">
+      <button class="sound-btn" data-audio="music" type="button"></button>
+      <button class="sound-btn" data-audio="sfx" type="button"></button>
+    </div>
+    <h1>WHISPER<br>PROTOCOL</h1>
+
+    <!-- 1. 입장 화면 -->
+    <section id="join-screen" class="screen">
+      <!-- 캐릭터 꾸미기: 가운데 큰 미리보기 + 부위별 ◀ ▶ -->
+      <div class="maker">
+        <div class="maker-stage">
+          <img id="maker-preview" class="avatar maker-preview" alt="내 캐릭터 미리보기">
+          <button id="maker-random" class="maker-random" type="button" aria-label="랜덤으로 꾸미기">🎲</button>
+        </div>
+        <div id="maker-rows" class="maker-rows"></div>
+      </div>
+      <input id="name-input" placeholder="닉네임" maxlength="12">
+      <input id="code-input" placeholder="방 코드 (예: NEON)" maxlength="6">
+      <button id="join-btn" class="primary">탑승하기</button>
+    </section>
+
+    <!-- 2. 로비 화면 -->
+    <section id="lobby-screen" class="screen hidden">
+      <div class="lobby-head">
+        <span>방 코드 <strong id="lobby-code"></strong></span>
+        <span id="player-count"></span>
+      </div>
+      <ul id="player-list"></ul>
+
+      <h2>게임 규칙</h2>
+      <div id="option-list" class="option-list"></div>
+
+      <div class="section-head">
+        <h2>직업 구성</h2>
+      </div>
+      <p id="role-summary" class="summary"></p>
+      <div id="role-list"></div>
+
+      <ul id="check-errors" class="errors"></ul>
+      <button id="start-btn" class="primary hidden">게임 시작</button>
+      <p id="lobby-note">방장이 시작하기를 기다리는 중...</p>
+    </section>
+
+    <!-- 3. 게임 화면
+         위: 상태바(고정) / 가운데: 탭 / 아래: 입력창(고정)
+         PC 화면에서는 채팅이 왼쪽에 항상 보이고, 탭은 오른쪽 -->
+    <section id="game-screen" class="screen game hidden">
+
+      <!-- 상태바 -->
+      <header class="hud">
+        <div class="hud-top">
+          <span id="phase-icon" class="phase-icon"></span>
+          <span class="phase-text">
+            <span id="day-label" class="day"></span>
+            <span id="phase-label" class="phase"></span>
+          </span>
+          <button class="sound-btn" data-audio="music" type="button"></button>
+          <button class="sound-btn" data-audio="sfx" type="button"></button>
+          <span class="timer-wrap"><i data-icon="clock"></i><span id="timer" class="timer"></span></span>
+        </div>
+        <div class="timer-bar"><div id="timer-fill"></div></div>
+        <!-- 내 상태: 체력 칸 + 크레딧 (본인만 보는 정보) -->
+        <div class="hud-me">
+          <button id="me-role" class="me-role" type="button"></button>
+          <div id="hp" class="hp" role="img" aria-label="체력"></div>
+          <div id="credits" class="credits" aria-label="크레딧">
+            <i data-icon="credit"></i>
+            <span id="credit-num" class="credit-num">0</span><span class="unit">만</span>
+            <span id="credit-delta" class="credit-delta"></span>
+          </div>
+        </div>
+        <p id="phase-info" class="phase-info"></p>
+
+        <!-- 객실 복도: 방마다 이름표, 오른쪽 끝은 엘리베이터 -->
+        <div id="deck" class="deck">
+          <div id="rooms" class="rooms"></div>
+        </div>
+      </header>
+
+      <!-- 탭 버튼 (단계에 따라 보이는 탭이 달라짐) -->
+      <nav id="tabs" class="tabs">
+        <button data-tab="chat"><i data-icon="appChat"></i><span>채팅</span><i class="dot"></i></button>
+        <button data-tab="info"><i data-icon="appInfo"></i><span>내 정보</span><i class="dot"></i></button>
+        <button data-tab="action"><i data-icon="appAction"></i><span>능력</span><i class="dot"></i></button>
+        <button data-tab="shop"><i data-icon="appShop"></i><span>암상인</span><i class="dot"></i></button>
+        <button data-tab="darknet"><i data-icon="appDarknet"></i><span>다크넷</span><i class="dot"></i></button>
+        <button data-tab="bank"><i data-icon="appBank"></i><span>송금</span><i class="dot"></i></button>
+        <button data-tab="casino"><i data-icon="appCasino"></i><span>카지노</span><i class="dot"></i></button>
+        <button data-tab="vote"><i data-icon="appVote"></i><span>투표</span><i class="dot"></i></button>
+        <button data-tab="memo"><i data-icon="appMemo"></i><span>메모</span><i class="dot"></i></button>
+      </nav>
+
+      <!-- 채팅 (PC에서는 항상 보임) -->
+      <section class="pane pane-chat" data-pane="chat">
+        <!-- 원형 지도 무대: 공개 발언·투표 때 채팅 위에 지도를 띄움 (말풍선, 눌러서 투표) -->
+        <div id="map-stage" class="map-stage hidden">
+          <div class="map-stage-head"><span id="stage-title"></span><span id="stage-hint" class="stage-hint"></span></div>
+          <div id="map-stage-slot" class="map-stage-slot"></div>
+        </div>
+        <!-- 밀담 부스: 독대 시간에만 보임. 나(왼쪽)와 상대(오른쪽)가 마주 앉음 -->
+        <div id="booth" class="booth-panel hidden" aria-live="polite">
+          <div class="booth-head">
+            <span id="booth-title" class="booth-title"></span>
+            <span class="booth-head-right">
+              <button id="booth-leave" class="booth-leave" type="button">대화 종료</button>
+              <span id="booth-rounds" class="booth-rounds" aria-label="라운드"></span>
+            </span>
+          </div>
+          <div class="booth-stage">
+            <span id="booth-sign" class="booth-sign">PRIVATE</span>
+            <div id="booth-me" class="seat me"></div>
+            <div class="booth-table" aria-hidden="true"><i></i><i></i></div>
+            <div id="booth-them" class="seat them"></div>
+            <div class="booth-door left" aria-hidden="true"></div>
+            <div class="booth-door right" aria-hidden="true"></div>
+            <div id="booth-closed" class="booth-closed"></div>
+          </div>
+          <div id="booth-badges" class="booth-badges"></div>
+        </div>
+        <div id="private-box" class="private-box hidden"></div>
+        <ul id="chat-log"></ul>
+      </section>
+
+      <div class="panes">
+        <!-- 내 정보 -->
+        <section class="pane app app-info" data-pane="info">
+          <div id="role-card" class="role-card"></div>
+          <h3 class="pane-title">지금까지 알아낸 것</h3>
+          <ul id="intel-log" class="intel-log"></ul>
+        </section>
+
+        <!-- 밤 능력 -->
+        <section class="pane app app-action" data-pane="action">
+          <!-- 선내 지도: 평소엔 여기 있고, 아침 재생 때는 화면 가운데로 옮겨짐 -->
+          <div id="action-map" class="action-map">
+            <div id="shipmap" class="shipmap">
+              <div class="hall"><div id="hatch" class="hatch"></div></div>
+              <div id="mrooms" class="mrooms"></div>
+              <div id="map-fx" class="map-fx" aria-hidden="true"></div>
+              <div id="mwalker" class="mwalker" aria-hidden="true">
+                <svg viewBox="0 0 24 40" width="24" height="40">
+                  <circle cx="12" cy="7" r="6"/>
+                  <path d="M3 40 L5 20 Q12 13 19 20 L21 40 Z"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+          <div id="action-panel" class="action-panel">
+            <strong id="action-label"></strong>
+            <p id="action-note" class="action-note"></p>
+            <div id="action-modes" class="action-modes"></div>
+            <p id="action-pick" class="action-pick"></p>
+            <!-- 값 저장용 (화면에는 안 보임. 대상은 복도 객실을 눌러서 고름) -->
+            <select id="action-target" class="hidden" aria-hidden="true"></select>
+            <select id="action-target2" class="hidden" aria-hidden="true"></select>
+            <button id="action-btn" class="primary">결정</button>
+            <p id="action-chosen" class="action-chosen"></p>
+          </div>
+        </section>
+
+        <!-- 암상인 -->
+        <section class="pane app app-shop" data-pane="shop">
+          <!-- 화물칸: 도착 전엔 해치가 닫혀 있음 -->
+          <div class="shop-head">
+            <div class="ghost-face" aria-hidden="true">
+              <!-- 그림이 있으면 그림, 없으면 G 동그라미 -->
+              <img id="ghost-img" src="img/ghost/ghost_default.png" alt="">
+              <span>G</span>
+            </div>
+            <div>
+              <strong>암상인 "고스트"</strong>
+              <p id="ghost-line" class="ghost-line"></p>
+            </div>
+            <span id="shop-state" class="badge"></span>
+          </div>
+          <div id="cargo-hatch" class="cargo-hatch" aria-hidden="true"><span></span><span></span></div>
+          <div id="shop-list" class="shop-grid"></div>
+          <p class="legend"><i data-icon="tonight"></i>오늘 밤 <i data-icon="tomorrow"></i>내일 낮 <i data-icon="inbox"></i>아침에 결과</p>
+        </section>
+
+        <!-- 다크넷 + 송금 -->
+        <section class="pane app app-darknet" data-pane="darknet">
+          <div class="term-head"><span>darknet://leviathan</span><span class="term-dots"><i></i><i></i><i></i></span></div>
+          <pre id="term-log" class="term-log"></pre>
+          <div id="darknet-list" class="svc-list"></div>
+        </section>
+
+        <!-- 송금: 혼자만 밝은 대기업 은행 앱 -->
+        <section class="pane app app-bank" data-pane="bank">
+          <div class="bank-head"><i data-icon="appBank"></i><strong>LEVIATHAN BANK</strong></div>
+          <div class="bank-balance"><small>내 잔액</small><span id="bank-balance">0</span><span class="unit">만</span></div>
+          <small class="bank-label">받는 사람</small>
+          <div id="bank-people" class="bank-people"></div>
+          <div class="bank-amount"><span id="bank-amount">0</span><span class="unit">만</span></div>
+          <div id="keypad" class="keypad">
+            <button type="button" data-key="1">1</button><button type="button" data-key="2">2</button><button type="button" data-key="3">3</button>
+            <button type="button" data-key="4">4</button><button type="button" data-key="5">5</button><button type="button" data-key="6">6</button>
+            <button type="button" data-key="7">7</button><button type="button" data-key="8">8</button><button type="button" data-key="9">9</button>
+            <button type="button" data-key="all">전액</button><button type="button" data-key="0">0</button><button type="button" data-key="del" aria-label="지우기"><i data-icon="back"></i></button>
+          </div>
+          <button id="transfer-btn" class="bank-send" type="button">보내기</button>
+        </section>
+
+        <!-- 카지노 -->
+        <section class="pane app app-casino" data-pane="casino">
+          <div id="casino-stage" class="casino-stage">
+            <div class="wheel-wrap"><div id="wheel" class="wheel"></div><i class="pointer"></i></div>
+            <div id="reels" class="reels"><span>7</span><span>7</span><span>7</span></div>
+            <p id="casino-result" class="casino-result">베팅액을 넣고 게임을 고르세요.</p>
+          </div>
+          <div class="bet-row">
+            <small>베팅</small>
+            <span class="bet-now"><span id="bet-view">10</span>만</span>
+          </div>
+          <div id="chips" class="chips">
+            <button type="button" class="chip c10" data-bet="10">10</button>
+            <button type="button" class="chip c20" data-bet="20">20</button>
+            <button type="button" class="chip c50" data-bet="50">50</button>
+            <button type="button" class="chip call" data-bet="all">올인</button>
+          </div>
+          <input id="bet-amount" class="hidden" aria-hidden="true" value="10">
+          <div id="gamble-list" class="gamble-list"></div>
+
+          <!-- 채굴 미션: 서버가 낸 문제를 풀면 크레딧 -->
+          <div class="mine-box">
+            <div class="mine-head">
+              <strong>⛏ 수동 채굴</strong>
+              <span id="mine-left" class="mine-left"></span>
+            </div>
+            <p id="mine-desc" class="mine-desc">미션을 깨면 크레딧이 들어옵니다. 틀리면 5초 과열.</p>
+            <div id="mine-target" class="mine-target hidden"></div>
+            <div id="mine-board" class="mine-board"></div>
+            <div class="mine-timer"><i id="mine-bar"></i></div>
+            <button id="mine-btn" class="mine-btn" type="button">채굴 시작</button>
+          </div>
+        </section>
+
+        <!-- 메모장: 내 브라우저에만 저장 -->
+        <section class="pane app app-memo" data-pane="memo">
+          <h3 class="pane-title">승객 메모</h3>
+          <p class="memo-help">표시는 복도 이름표에도 보입니다. 나만 볼 수 있어요.</p>
+          <div id="memo-people" class="memo-people"></div>
+          <h3 class="pane-title">자유 메모</h3>
+          <textarea id="memo-free" class="memo-free" maxlength="4000" placeholder="알아낸 것, 누가 무슨 말을 했는지 적어 두세요."></textarea>
+        </section>
+
+        <!-- 투표 -->
+        <section class="pane app app-vote" data-pane="vote">
+          <h3 class="pane-title">추방 대상 선택</h3>
+          <div id="vote-panel" class="vote-panel"></div>
+        </section>
+      </div>
+
+      <!-- 입력창 -->
+      <footer class="dock">
+        <form id="chat-form">
+          <input id="chat-input" placeholder="메시지 입력" maxlength="200" autocomplete="off">
+          <button id="send-btn" class="primary">전송</button>
+        </form>
+        <button id="end-speech-btn" class="primary hidden">발언 종료</button>
+      </footer>
+    </section>
+
+    <p id="error"></p>
+  </main>
+
+  <!-- 선내 방송 배너 (화면 위에 크게) -->
+  <div id="broadcast" class="broadcast" role="status" aria-live="polite">
+    <span class="bc-head">선내 방송</span>
+    <p id="bc-text"></p>
+  </div>
+
+  <!-- 내 체력이 줄었을 때 화면 가장자리만 붉게 (나에게만 보임) -->
+  <div id="hurt-vignette" class="hurt-vignette" aria-hidden="true"></div>
+
+  <!-- 아침 / 투표 결과 재생: 선내 지도를 화면 가운데 크게 + 자막 -->
+  <div id="replay" class="replay hidden" role="status" aria-live="polite">
+    <div id="replay-head" class="replay-head"></div>
+    <div id="replay-slot" class="replay-slot"></div>
+    <p id="replay-sub" class="replay-sub"></p>
+  </div>
+
+  <!-- 단계 전환 타이틀 카드 (1.2초) -->
+  <div id="phase-card" class="phase-card" aria-hidden="true">
+    <strong id="pc-title"></strong>
+    <p id="pc-sub"></p>
+  </div>
+
+  <!-- 시작 연출: 이륙 → 직업 카드 공개 -->
+  <div id="intro" class="intro hidden">
+    <div class="sky"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="ship" aria-hidden="true"><div class="hull"></div><div class="gondola"></div><div class="fin"></div></div>
+    <p class="intro-line l1">카지노 비행선 <b id="ship-name"></b> 탑승 수속 완료</p>
+    <p class="intro-line l2">곧 이륙합니다. 당신의 신분은</p>
+    <div class="intro-card">
+      <div class="card-inner">
+        <div class="card-back">WHISPER<br>PROTOCOL</div>
+        <div id="card-front" class="card-front"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 게임 결과 -->
+  <div id="result" class="result hidden">
+    <div id="confetti" class="confetti" aria-hidden="true"></div>
+    <div class="result-card">
+      <p id="result-me" class="result-me"></p>
+      <h2 id="result-headline" class="result-headline"></h2>
+      <p id="result-reason" class="result-reason"></p>
+      <ul id="result-list" class="result-list"></ul>
+      <div class="result-actions">
+        <button id="restart-btn" class="primary">같은 멤버로 다시 하기</button>
+        <button id="to-lobby-btn" class="ghost">로비에서 설정 바꾸기</button>
+        <button id="leave-btn" class="ghost">방 나가기</button>
+      </div>
+      <p id="result-note" class="result-note"></p>
+    </div>
+  </div>
+
+  <!-- Socket.IO 서버가 자동으로 제공하는 파일 -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="icons.js"></script>
+  <script src="avatar.js"></script>
+  <script src="sound.js"></script>
+  <script src="fx.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
