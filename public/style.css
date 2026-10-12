@@ -151,7 +151,7 @@ main:has(#game-screen:not(.hidden)) h1 { display: none; }
 /* 단계별 분위기 */
 .game[data-phase="night"] { border-color: var(--night); box-shadow: 0 0 22px #6b3cff44; }
 .game[data-phase="vote"] { border-color: var(--syndicate); box-shadow: 0 0 22px #ff4d6d33; }
-.game[data-phase="speech"] { border-color: var(--third); }
+.game[data-phase="day"] { border-color: var(--third); }
 
 /* ----- 상태바 ----- */
 .hud {
@@ -1143,7 +1143,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 }
 .game[data-phase="night"] .phase-icon { color: #b39bff; }
 .game[data-phase="morning"] .phase-icon { color: var(--neon); }
-.game[data-phase="speech"] .phase-icon { color: var(--third); }
+.game[data-phase="day"] .phase-icon { color: var(--third); }
 .game[data-phase="vote"] .phase-icon,
 .game[data-phase="result"] .phase-icon { color: var(--syndicate); }
 .phase-text { flex: 1; display: flex; flex-direction: column; line-height: 1.2; }
@@ -2173,3 +2173,24 @@ body:has(#game-screen:not(.hidden)) .corner-audio { display: none; }
 .dm-form button { padding: 8px 12px; font-size: 14px; }
 #chat-log .group .tag { color: var(--cyan); }
 #chat-log .dm .tag { color: #9ff7ff; }
+
+/* =====================================================
+   v2 배경: 낮 = 카지노 홀, 밤 = 내 객실
+   화면 바깥(본문 배경)과 채팅 칸 뒤에 깔고, 글자가 잘 읽히도록 어둡게 덮음
+   ===================================================== */
+body:has(.game[data-phase="day"]),
+body:has(.game[data-phase="vote"]),
+body:has(.game[data-phase="result"]) {
+  background: linear-gradient(#0b0b14b0, #0b0b14d9), url("img/bg/casino_day.jpg") center / cover no-repeat fixed, var(--bg);
+}
+body:has(.game[data-phase="night"]) {
+  background: linear-gradient(#07071099, #070710d0), url("img/bg/cabin.jpg") center / cover no-repeat fixed, var(--bg);
+}
+.game[data-phase="day"] .pane-chat,
+.game[data-phase="vote"] .pane-chat,
+.game[data-phase="result"] .pane-chat {
+  background: linear-gradient(180deg, #0f0f1ccc 0%, #0f0f1cf0 55%, #0f0f1c 100%), url("img/bg/casino_day.jpg") center 30% / cover no-repeat;
+}
+.game[data-phase="night"] .pane-chat {
+  background: linear-gradient(180deg, #08081299 0%, #080812e6 55%, #080812 100%), url("img/bg/cabin.jpg") center 40% / cover no-repeat;
+}
