@@ -6,13 +6,15 @@
 //     → 장갑 → 치료(리퍼닥·의료 드론) → 조사
 //
 //  규칙 요약
-//  - 부상(체력이 최대보다 낮음) 상태로 밤을 맞으면 직업 능력을 못 씀 (아이템·돈은 가능)
-//    → 밤 사이에 다친 사람은 "다음 밤"부터 막힘
+//  - 부상(체력이 최대보다 낮음)이어도 능력·아이템 모두 사용 가능 (v2에서 패널티 삭제)
+//  - 보디가드가 공격을 대신 막아내면 +30만 크레딧
 //  - 신디케이트는 모두 [공격 투표] 또는 [자기 특수 능력] 중 하나를 고름
 //    공격은 팀 전체 밤 1회. 표가 한 사람에게 모이면 공격, 갈리면 50% 확률로만 공격
 // =====================================================
 const { ROLES } = require("./roles");
 const { DEEPFAKE_TEMPLATES } = require("./economy");
+
+const BODYGUARD_REWARD = 30; // 경호 성공 보수 (만 크레딧)
 
 // 직업별 밤 행동 정의
 //  self: 자기 자신을 고를 수 있는지 / noAlly: 신디케이트 동료는 못 고름
@@ -21,7 +23,6 @@ const ACTIONS = {
   cyberpol:  { label: "조사" },
   whitehat:  { label: "능력 방해" },
   ripperdoc: { label: "치료" },
-  host:      { label: "독대 짝 지정", pair: true, self: true },
   bodyguard: { label: "경호" },
   watcher:   { label: "감시" },
   dealer:    { label: "크레딧 확인" },
@@ -51,7 +52,6 @@ function nightOptions(game, p) {
   if (!p.alive) return { reason: "사망자는 행동할 수 없습니다." };
 
   if (p.team === "syndicate") {
-    if (isInjured(p)) return { reason: "부상 중이라 공격 투표도 능력도 쓸 수 없습니다. (아이템·돈은 사용 가능)" };
     const attackTo = alive.map((t) => t.name); // 자기 자신이나 동료도 고를 수 있음 (시민 교란용)
     const note = "공격은 팀 전체 하루 1회. 표가 한 사람에게 모이면 공격, 갈리면 50% 확률로만 공격합니다.";
     const sp = SYNDICATE_SPECIALS[p.role];
@@ -67,7 +67,6 @@ function nightOptions(game, p) {
 
   const act = ACTIONS[p.role];
   if (!act) return { reason: "밤에 할 수 있는 직업 능력이 없습니다." };
-  if (isInjured(p)) return { reason: "부상 중이라 직업 능력을 쓸 수 없습니다. (아이템·돈은 사용 가능)" };
 
   let candidates = alive;
   if (!act.self) candidates = candidates.filter((t) => t !== p);
@@ -143,7 +142,7 @@ function resolveNight(game, rand = Math.random) {
     const a = night.actions[id];
     const shown = find(a.target);
     if (!actor || !actor.alive || !shown || !shown.alive) continue;
-    const target = actor.role === "host" ? shown : redirect(actor, shown); // 호스트 주선은 우회 대상이 아님
+    const target = redirect(actor, shown);
     acts.push({ actor, shown, target, target2: find(a.target2), mode: a.mode });
   }
   const actOf = (role) => acts.find((a) => a.actor.role === role);
@@ -252,7 +251,8 @@ function resolveNight(game, rand = Math.random) {
   const strike = (t) => {
     if (works(guard) && guard.target === t) {
       hit(guard.actor);
-      tell(guard.actor, t.name + "을(를) 노린 공격을 대신 받아냈다.");
+      guard.actor.credits += BODYGUARD_REWARD;
+      tell(guard.actor, t.name + "을(를) 노린 공격을 대신 받아냈다. 경호 보수 +" + BODYGUARD_REWARD + "만");
     } else {
       hit(t);
     }
@@ -346,7 +346,9 @@ function resolveNight(game, rand = Math.random) {
   const watch = actOf("watcher");
   if (works(watch)) {
     const names = [...(targetedBy[watch.target.id] || [])].filter((n) => n !== watch.actor.name);
-    tell(watch.actor, watch.shown.name + "을(를) 지목한 사람: " + (names.length ? names.join(", ") : "없음"));
+    tell(watch.actor, names.length
+      ? "감시 결과: 오늘 밤 " + watch.shown.name + "에게 능력을 쓴 사람은 " + names.join(", ") + "."
+      : "감시 결과: 오늘 밤 " + watch.shown.name + "에게는 아무도 능력을 쓰지 않았다.");
   }
 
   const dealer = actOf("dealer");
@@ -393,13 +395,6 @@ function resolveNight(game, rand = Math.random) {
   }
 
   // ----- 다음 날에 영향을 주는 것들 -----
-  const host = actOf("host");
-  game.forcedPair = null;
-  if (works(host) && host.target2 && host.target2.alive && host.target !== host.target2) {
-    game.forcedPair = [host.target.id, host.target2.id];
-    tell(host.actor, host.target.name + "와(과) " + host.target2.name + "의 만남을 주선했다.");
-  }
-
   const fixer = actOf("fixer");
   game.fixedVoter = null;
   if (works(fixer)) {
@@ -424,4 +419,4 @@ function resolveNight(game, rand = Math.random) {
   return { lines, events, priv };
 }
 
-module.exports = { ACTIONS, SYNDICATE_SPECIALS, maxHp, isInjured, nightOptions, resolveNight, appearance, investigate };
+module.exports = { BODYGUARD_REWARD, ACTIONS, SYNDICATE_SPECIALS, maxHp, isInjured, nightOptions, resolveNight, appearance, investigate };

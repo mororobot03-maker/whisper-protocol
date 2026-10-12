@@ -33,7 +33,6 @@ const chatLog = document.querySelector("#chat-log");
 const chatForm = document.querySelector("#chat-form");
 const chatInput = document.querySelector("#chat-input");
 const sendBtn = document.querySelector("#send-btn");
-const endSpeechBtn = document.querySelector("#end-speech-btn");
 const hpBox = document.querySelector("#hp");
 const creditBox = document.querySelector("#credits");
 const creditNum = document.querySelector("#credit-num");
@@ -143,7 +142,7 @@ function setTab(name, silent) {
   if (name === "chat" && wide.matches) name = "info";
   const changed = currentTab !== name;
   currentTab = name;
-  updateMusic(); // 밤에 카지노 탭을 열면 카지노 음악
+  updateMusic(); // 낮에 카지노 탭을 열면 카지노 음악
   for (const btn of tabs.querySelectorAll("button")) btn.classList.toggle("active", btn.dataset.tab === name);
   for (const pane of document.querySelectorAll(".pane")) {
     const on = pane.dataset.pane === name;
@@ -160,26 +159,35 @@ function setTab(name, silent) {
   if (!silent) openedApps.add(name);
   setDot(name, false);
   if (name === "chat") chatLog.scrollTop = chatLog.scrollHeight;
+  if (name === "dm" && dm.open) {
+    dm.unread[dm.open] = 0;
+    drawDM();
+  }
 }
 
 // 단계마다 보여줄 탭과 처음 열 탭
+// 낮: 그룹 채팅 · 카지노 · 송금 / 밤: 능력 · 메신저 · 암상인 · 다크넷 · 송금 / 투표: 투표
 function setupTabs(data) {
   const night = data.phase === "night" && data.alive;
+  const day = data.phase === "day" && data.alive;
   const show = {
     chat: true,
+    dm: data.phase === "night", // 사망자도 관전용으로 열림
     info: true,
     action: night,
     shop: night,
     darknet: night,
-    bank: night,
-    casino: night || !!data.canCasino, // 독대 대기실에서도 카지노
+    bank: night || day,
+    casino: day,
     vote: !!data.canVote,
     memo: true,
   };
   for (const btn of tabs.querySelectorAll("button")) btn.classList.toggle("hidden", !show[btn.dataset.tab]);
+  document.querySelector("#chat-tab-label").textContent = data.phase === "day" ? "그룹 채팅" : "채팅";
 
   openedApps.clear(); // 새 단계: 앱을 처음 열 때 연출이 다시 나옴
   if (night) setTab("action", true);
+  else if (data.phase === "night") setTab("dm", true); // 사망자: 메신저 관전
   else if (data.canVote) setTab("vote", true);
   else setTab("chat", true);
 }
@@ -245,7 +253,7 @@ function drawRoles(catalog, settings, check, isHost) {
       nm.append(roleIcon(id), " " + role.name);
       btn.appendChild(nm);
       btn.appendChild(make("small", null, role.desc));
-      const tag = role.noBan ? (id === "vip" ? "필수" : "기본") : banned ? "금지" : locked ? role.minPlayers + "인 이상" : "";
+      const tag = role.noBan ? (id === "vip" ? "필수" : "기본") : banned ? "금지" : locked ? (role.minPlayers || 7) + "인 이상" : ""; // 제3세력은 7인부터
       if (tag) btn.appendChild(make("em", "ban-tag", tag));
       grid.appendChild(btn);
     }
@@ -843,7 +851,6 @@ gambleList.addEventListener("click", (e) => {
 });
 
 meRole.addEventListener("click", () => setTab("info"));
-endSpeechBtn.addEventListener("click", () => socket.emit("endSpeech"));
 
 // 결과 화면 버튼
 document.querySelector("#restart-btn").addEventListener("click", () => socket.emit("restart"));
@@ -869,8 +876,17 @@ socket.on("lobby", (data) => {
   playerList.innerHTML = "";
   rememberColors(data.players);
   data.players.forEach((p) => {
-    const li = make("li");
+    const host = p.name === data.hostName;
+    const li = make("li", host ? "host" : "");
     li.appendChild(nameTag(p.name));
+    if (host) li.appendChild(make("span", "crown", "♛"));
+    else if (isHost) {
+      const give = make("button", "give-host", "♛ 위임");
+      give.title = p.name + "에게 방장 넘기기";
+      give.type = "button";
+      give.dataset.give = p.name;
+      li.appendChild(give);
+    }
     playerList.appendChild(li);
   });
 
@@ -899,6 +915,7 @@ socket.on("lobby", (data) => {
 socket.on("yourRole", (role) => {
   chatLog.innerHTML = ""; // 새 게임이니 지난 대화, 기록 지우기
   resetMemo();
+  resetDM();
   lastHp = null;
   shownCredits = null;
   intelLog.innerHTML = "";
@@ -1070,19 +1087,16 @@ socket.on("board", (players) => {
 let lastCardKey = "";
 function phaseCard(data) {
   if (data.phase === "intro") lastCardKey = ""; // 새 게임 시작 시 기록 초기화
-  const key = data.phase === "talk" ? data.title : data.phase + data.day; // 독대는 라운드마다
+  const key = data.phase + data.day;
   if (key === lastCardKey) return false;
   lastCardKey = key;
 
   if (data.phase === "night") {
-    showPhaseCard(data.day + "일차 밤", data.alive ? "능력 · 암상인 · 카지노" : "관전 중", "night");
+    showPhaseCard(data.day + "일차 밤", data.alive ? "통행금지 · 능력 · 메신저 · 암상인" : "관전 중", "night");
   } else if (data.phase === "morning") {
     showPhaseCard(data.day + "일차 아침", "선내 방송", "morning");
-  } else if (data.phase === "talk") {
-    const sub = !data.alive ? "관전 중" : data.partner ? "상대: " + data.partner : "이번 라운드는 대기실";
-    showPhaseCard(data.title, sub, "talk");
-  } else if (data.phase === "speech") {
-    showPhaseCard("공개 발언", "한 명씩 차례로 모두에게", "speech");
+  } else if (data.phase === "day") {
+    showPhaseCard(data.day + "일차 낮", data.alive ? "카지노 · 그룹 채팅" + (data.voteToday ? " · 끝나면 투표" : "") : "관전 중", "talk");
   } else if (data.phase === "vote") {
     showPhaseCard("투표", data.canVote ? "비행선 밖으로 던질 사람을 고르세요" : "관전 중", "vote");
   } else {
@@ -1097,7 +1111,7 @@ socket.on("phase", (data) => {
   dayLabel.textContent = data.day + "일차";
   phaseLabel.textContent = data.title;
   currentDay = data.day;
-  const PHASE_ICONS = { intro: "ship", night: "moon", morning: "sun", talk: "talk", speech: "megaphone", vote: "ballot", result: "ballot", over: "ship" };
+  const PHASE_ICONS = { intro: "ship", day: "appCasino", night: "moon", morning: "sun", vote: "ballot", result: "ballot", over: "ship" };
   phaseIcon.innerHTML = "";
   phaseIcon.appendChild(icon(PHASE_ICONS[data.phase] || "ship"));
   picker = null; // 단계가 바뀌면 펼쳐둔 선택 칸 닫기
@@ -1120,29 +1134,27 @@ socket.on("phase", (data) => {
   // 채팅 칸: 말할 수 있는 단계에서만 열림
   chatInput.disabled = !data.canChat;
   sendBtn.disabled = !data.canChat; // 말할 수 없을 땐 전송 버튼도 회색
-  chatInput.placeholder = data.canChat ? "메시지 입력" : "지금은 말할 수 없습니다";
+  chatInput.placeholder = data.canChat
+    ? data.phase === "night" ? "신디케이트 암호화 채널" : "그룹 채팅 · 모두에게"
+    : data.phase === "night" && data.alive ? "밤에는 메신저 앱으로 1:1 대화" : "지금은 말할 수 없습니다";
   if (data.canChat) chatInput.focus();
 
-  endSpeechBtn.classList.toggle("hidden", !data.isSpeaker);
+  setupDM(data);
 
   // ----- 연출 -----
   if (data.phase === "intro") showIntro(data.shipName);
   else hideIntro();
 
-  // 단계가 바뀌는 순간 타이틀 카드 (같은 단계 안에서 발언자만 바뀔 땐 생략)
+  // 단계가 바뀌는 순간 타이틀 카드
   const cardShown = phaseCard(data);
-  const PHASE_SFX = { night: "night", morning: "morning", speech: "speech", vote: "vote" };
+  const PHASE_SFX = { night: "night", morning: "morning", day: "speech", vote: "vote" };
   if (cardShown && PHASE_SFX[data.phase]) sound.play(PHASE_SFX[data.phase]);
 
-  // 독대 시간: 밀담 부스 화면 (문 닫힘 → 열림) / 사망자는 관전
-  showBooth(data);
-
-  // 공개 발언·투표·결과: 채팅 위에 원형 지도
-  if (data.phase === "speech") {
-    showStage("speech", {
-      title: "공개 발언 · " + (data.speaker || ""),
-      hint: data.isSpeaker ? "내 차례! 아래 입력창에 말하면 지도에 말풍선으로 떠요" : "발언자의 말이 지도 위에 떠요",
-      speaker: data.speaker,
+  // 낮·투표·결과: 채팅 위에 원형 지도
+  if (data.phase === "day") {
+    showStage("day", {
+      title: "카지노 라운지 · 그룹 채팅",
+      hint: data.alive ? "아래 입력창에 말하면 지도에 말풍선으로 떠요" : "관전 중",
     });
   } else if (data.phase === "vote") {
     showStage("vote", {
@@ -1181,7 +1193,7 @@ socket.on("voted", (name) => {
   setVotePick(name); // 지도에도 표시
 });
 
-const CHANNEL_TAG = { syndicate: "[암호화] ", speech: "[발언] ", booth: "", wiretap: "[도청] ", spectate: "[관전] " };
+const CHANNEL_TAG = { syndicate: "[암호화] ", group: "", wiretap: "[도청] " };
 
 socket.on("chat", (msg) => {
   const mine = msg.fromId === socket.id;
@@ -1193,61 +1205,8 @@ socket.on("chat", (msg) => {
   line.appendChild(make("span", "text", ": " + msg.text));
   addLine(line, (mine ? "me" : "them") + " " + msg.channel);
 
-  if (msg.channel === "booth") boothSay(mine, msg.text); // 부스 화면 말풍선
-  if (msg.channel === "speech") mapSay(msg.from, msg.text); // 공개 발언: 지도 위 말풍선
-  if (msg.channel === "spectate") spectateSay(msg.from, msg.text);
+  if (msg.channel === "group") mapSay(msg.from, msg.text); // 낮 그룹 채팅: 원형 지도 위 말풍선
   sound.play(msg.channel === "wiretap" ? "whisper" : mine ? "msgOut" : "msgIn");
-});
-
-// ----- 밀담 부스: 대화 종료 -----
-document.querySelector("#booth-leave").addEventListener("click", () => {
-  if (pressLeaveBtn()) socket.emit("leaveBooth");
-});
-document.querySelector("#booth-badges").addEventListener("click", (e) => {
-  const pick = e.target.closest(".spec-pick");
-  if (pick) {
-    sound.play("tab");
-    return socket.emit("spectateBooth", Number(pick.dataset.no));
-  }
-  if (e.target.closest(".go-casino")) {
-    sound.play("tab");
-    setTab("casino");
-  }
-});
-// ----- 사망자 관전 -----
-socket.on("spectateLog", (info) => {
-  enterSpectate(info);
-  addLine("── 밀담 부스 #" + info.no + " 엿보기 (" + info.names.join(" ↔ ") + ") ──", "divider");
-  if (!info.msgs.length) addLine("아직 아무 말도 없었습니다.", "system");
-  for (const m of info.msgs) {
-    const line = document.createDocumentFragment();
-    line.appendChild(make("span", "tag", "[관전] "));
-    line.appendChild(nameTag(m.from, true));
-    line.appendChild(make("span", "text", ": " + m.text));
-    addLine(line, "them spectate");
-  }
-});
-socket.on("spectateEnded", ({ by }) => {
-  addLine("[관전] " + by + " 님이 대화를 끝냈습니다.", "system");
-  if (spectating) endBooth(by + " 님이 대화를 끝냈습니다");
-});
-
-socket.on("boothEnded", ({ byMe, by }) => {
-  phaseInfo.textContent = "대화가 끝났습니다. 남은 시간은 카지노에서 보낼 수 있습니다.";
-  addLine(byMe ? "대화를 끝냈습니다." : by + " 님이 대화를 끝냈습니다.", "system");
-  chatInput.disabled = true;
-  sendBtn.disabled = true;
-  chatInput.placeholder = "대화가 끝났습니다";
-  endBooth(byMe ? "내가 대화를 끝냈습니다" : by + " 님이 대화를 끝냈습니다");
-  sound.play("door");
-  // 카지노 탭 열어 주기
-  tabs.querySelector('[data-tab="casino"]').classList.remove("hidden");
-  setDot("casino", true);
-});
-
-socket.on("partnerLeft", (name) => {
-  addLine(name + " 님이 연결을 끊었습니다.", "system");
-  if (!boothUI.el.classList.contains("hidden")) fillSeat(boothUI.them, null, "empty", name + " · 연결 끊김");
 });
 
 socket.on("errorMsg", (msg) => {
@@ -1520,13 +1479,167 @@ document.addEventListener("click", (e) => {
 drawSoundBtns();
 
 // 지금 어떤 배경음악이 나와야 하는지: 화면 + 게임 단계 + (밤이면) 열린 탭
-const PHASE_MUSIC = { intro: "lobby", night: "night", morning: null, talk: "talk", speech: "vote", vote: "vote", result: "vote", over: null };
+const PHASE_MUSIC = { intro: "lobby", day: "talk", night: "night", morning: null, vote: "vote", result: "vote", over: null };
 function updateMusic() {
   if (screens.game.classList.contains("hidden")) return sound.music("lobby"); // 입장·로비
   const phase = screens.game.dataset.phase;
-  if ((phase === "night" || phase === "talk") && currentTab === "casino") return sound.music("casino");
+  if (phase === "day" && currentTab === "casino") return sound.music("casino");
   sound.music(PHASE_MUSIC[phase] ?? null);
 }
 updateMusic();
+
+// =====================================================
+//  로비 채팅 · 방장 넘기기
+// =====================================================
+const lobbyLogEl = document.querySelector("#lobby-log");
+socket.on("lobbyChat", (m) => {
+  const li = make("li", m.system ? "system" : m.fromId === socket.id ? "me" : "");
+  if (m.system) li.textContent = "· " + m.text;
+  else {
+    li.appendChild(nameTag(m.from, true));
+    li.appendChild(make("span", "text", ": " + m.text));
+    if (m.fromId !== socket.id) sound.play("msgIn");
+  }
+  lobbyLogEl.appendChild(li);
+  while (lobbyLogEl.children.length > 150) lobbyLogEl.firstChild.remove();
+  lobbyLogEl.scrollTop = lobbyLogEl.scrollHeight;
+});
+document.querySelector("#lobby-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = document.querySelector("#lobby-input");
+  const text = input.value.trim();
+  if (!text) return;
+  socket.emit("lobbyChat", text);
+  input.value = "";
+});
+playerList.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-give]");
+  if (!b) return;
+  // 실수 방지: 두 번 눌러야 넘어감
+  if (!b.classList.contains("confirm")) {
+    b.classList.add("confirm");
+    b.textContent = "확인";
+    setTimeout(() => { b.classList.remove("confirm"); b.textContent = "♛ 위임"; }, 3000);
+    return;
+  }
+  socket.emit("transferHost", b.dataset.give);
+});
+
+// 전원이 투표하면 몇 초 뒤 바로 마감
+socket.on("voteClosing", (seconds) => {
+  toast("전원이 투표했습니다. 곧 마감합니다.");
+  startTimer(seconds);
+});
+
+// =====================================================
+//  밤 1:1 메신저 (LEVIA TALK)
+//  살아있는 사람: 연락처 = 상대 이름, 대화는 나와 그 사람
+//  사망자(관전): 연락처 = "A ↔ B" 대화방, 읽기만
+// =====================================================
+const dm = {
+  contacts: document.querySelector("#dm-contacts"),
+  with: document.querySelector("#dm-with"),
+  log: document.querySelector("#dm-log"),
+  form: document.querySelector("#dm-form"),
+  input: document.querySelector("#dm-input"),
+  send: document.querySelector("#dm-send"),
+  state: document.querySelector("#dm-state"),
+  threads: {}, // { 대화방 키: [{ from, to, text }] }
+  unread: {},
+  people: [], // 오늘 밤 연락처 (살아있는 사람)
+  open: null,
+  spectate: false,
+  night: false,
+};
+
+function resetDM() {
+  dm.threads = {};
+  dm.unread = {};
+  dm.open = null;
+  drawDM();
+}
+
+function dmKey(msg) {
+  if (dm.spectate) return [msg.from, msg.to].sort().join(" ↔ ");
+  return msg.from === myName ? msg.to : msg.from;
+}
+
+function setupDM(data) {
+  dm.night = data.phase === "night";
+  dm.spectate = !!(data.dm && data.dm.spectate);
+  dm.people = data.dm && data.dm.contacts ? data.dm.contacts : [];
+  if (dm.open && !dm.spectate && !dm.people.includes(dm.open)) dm.open = null;
+  drawDM();
+}
+
+function drawDM() {
+  // 연락처: 살아있는 상대 전원 (+ 지난 밤 대화 상대) / 관전: 오간 대화방
+  const keys = dm.spectate ? Object.keys(dm.threads) : [...new Set([...dm.people, ...Object.keys(dm.threads)])];
+  dm.contacts.innerHTML = "";
+  if (!keys.length) dm.contacts.appendChild(make("li", "dm-none", dm.spectate ? "아직 오간 대화가 없어요" : ""));
+  for (const key of keys) {
+    const li = make("li");
+    const b = make("button", "dm-contact" + (dm.open === key ? " on" : ""));
+    b.type = "button";
+    b.dataset.key = key;
+    const box = make("span");
+    if (dm.spectate) box.appendChild(make("span", "name", key));
+    else box.appendChild(nameTag(key, true));
+    const last = (dm.threads[key] || []).at(-1);
+    if (last) box.appendChild(make("span", "preview", last.text));
+    b.appendChild(box);
+    if (dm.unread[key]) b.appendChild(make("span", "unread", String(dm.unread[key])));
+    li.appendChild(b);
+    dm.contacts.appendChild(li);
+  }
+
+  // 대화창
+  dm.log.innerHTML = "";
+  const canTalk = dm.night && !dm.spectate && dm.open && dm.people.includes(dm.open);
+  dm.with.textContent = dm.open ? (dm.spectate ? "관전 · " + dm.open : dm.open + " 님과의 대화") : dm.spectate ? "대화방을 고르면 내용을 볼 수 있어요" : "왼쪽에서 대화할 사람을 고르세요";
+  const list = dm.open ? dm.threads[dm.open] || [] : [];
+  if (dm.open && !list.length) dm.log.appendChild(make("li", "empty", "아직 메시지가 없어요"));
+  for (const m of list) {
+    const mine = !dm.spectate && m.from === myName;
+    const li = make("li", mine ? "me" : "");
+    if (dm.spectate) li.appendChild(make("small", null, m.from));
+    li.appendChild(document.createTextNode(m.text));
+    dm.log.appendChild(li);
+  }
+  dm.log.scrollTop = dm.log.scrollHeight;
+  dm.input.disabled = !canTalk;
+  dm.send.disabled = !canTalk;
+  dm.input.placeholder = dm.spectate ? "관전 중에는 말할 수 없어요" : !dm.night ? "메신저는 밤에만 열려요" : dm.open ? "1:1 메시지" : "상대를 먼저 고르세요";
+  dm.state.textContent = dm.spectate ? "GHOST MODE" : dm.night ? "통행금지 · 1:1만 가능" : "오프라인";
+  const total = Object.values(dm.unread).reduce((a, b) => a + b, 0);
+  setDot("dm", total > 0 && !isVisible("dm"));
+}
+
+dm.contacts.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-key]");
+  if (!b) return;
+  sound.play("tab");
+  dm.open = b.dataset.key;
+  dm.unread[dm.open] = 0;
+  drawDM();
+  if (!dm.input.disabled) dm.input.focus();
+});
+
+dm.form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = dm.input.value.trim();
+  if (!text || !dm.open) return;
+  socket.emit("dm", { to: dm.open, text });
+  dm.input.value = "";
+});
+
+socket.on("dm", (msg) => {
+  const key = dmKey(msg);
+  (dm.threads[key] = dm.threads[key] || []).push({ from: msg.from, to: msg.to, text: msg.text });
+  const mine = msg.fromId === socket.id;
+  if (!(dm.open === key && isVisible("dm"))) dm.unread[key] = (dm.unread[key] || 0) + (mine ? 0 : 1);
+  drawDM();
+  sound.play(mine ? "msgOut" : "msgIn");
+});
 
 fillIcons(); // HTML에 적어둔 아이콘 자리 채우기

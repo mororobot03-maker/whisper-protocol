@@ -1,7 +1,8 @@
 // =====================================================
 //  위스퍼 프로토콜 - 서버
-//  하루 흐름: 밤 → 아침 발표 → 독대 ×N → 공개 발언 → 투표(2일차부터) → 결과
-//            → 승리 판정 → 다음 밤 … → 착륙일이 되면 착륙
+//  하루 흐름 (v2): 1일차 낮 → 밤 → 아침(CCTV) → 낮 → 투표(2일차부터) → 결과
+//            → 승리 판정 → 다음 밤 … → 착륙일 투표가 끝나면 착륙
+//  낮: 카지노 + 그룹 채팅 + 송금 / 밤: 능력 + 1:1 메신저 + 암상인·다크넷 + 송금
 // =====================================================
 const express = require("express");
 const http = require("http");
@@ -33,7 +34,8 @@ const SECONDS_PER_EXECUTION = 8.5; // 처형 연출 (판결 → 에어락 카운
 const BASE_INCOME = 10; // 매 턴 기본 수입 (만 크레딧)
 const VIP_INCOME = 30;
 const DEV_START_CREDITS = Number(process.env.START_CREDITS) || 0; // 값이 있으면 방 설정보다 우선 (테스트용)
-const VOTE_SECONDS = 20;
+const VOTE_SECONDS = 25;
+const VOTE_EARLY_SECONDS = 2; // 전원이 투표하면 이 시간 뒤 바로 마감
 const RESULT_SECONDS = 6;
 
 // 캐릭터 꾸미기: 부위별 선택지 개수 (public/avatar.js 의 AVATAR_PARTS 와 같아야 함)
@@ -61,11 +63,6 @@ function shuffle(arr) {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
-}
-
-// 두 사람의 조합을 순서와 상관없이 같은 문자열로 만듦 (A|B == B|A)
-function pairKey(a, b) {
-  return a < b ? a + "|" + b : b + "|" + a;
 }
 
 // 표에 "진짜로 있는" 항목만 꺼냄.
@@ -116,11 +113,17 @@ function checkSettings(game) {
   return { errors, landingDays, pool, plan };
 }
 
+// 로비 채팅창에 시스템 알림 (입장·퇴장·방장 변경)
+function lobbyLog(game, text) {
+  io.to("game:" + game.code).emit("lobbyChat", { system: true, text });
+}
+
 // 같은 방의 모두에게 로비 정보 전송
 function sendLobby(game) {
   io.to("game:" + game.code).emit("lobby", {
     code: game.code,
     hostId: game.hostId,
+    hostName: findPlayer(game, game.hostId)?.name,
     phase: game.phase,
     players: game.players.map((p) => ({ name: p.name, color: p.color, avatar: p.avatar })),
     maxPlayers: MAX_PLAYERS,
@@ -243,11 +246,14 @@ function emptyDayEffects() {
   return { wiretaps: {}, masks: new Set(), jams: new Set(), bribes: new Set() };
 }
 
+// 독대(밀담 부스) 전용이던 아이템: v2에서 독대가 없어져 진열하지 않음 (2단계 경매에서 새 아이템으로 교체)
+const BOOTH_ITEMS = ["wiretap", "mask", "jammer"];
+
 // 오늘 밤 진열할 아이템 5~6개 (딥페이크는 게임당 1회라 이미 쓰였으면 제외)
 function rollShop(game) {
   // 테스트용: SHOP_ITEMS=proxy,jammer 처럼 지정하면 그 아이템만 진열
   if (process.env.SHOP_ITEMS) return process.env.SHOP_ITEMS.split(",").filter((id) => ITEMS[id]);
-  const pool = Object.keys(ITEMS).filter((id) => !(id === "deepfake" && game.deepfakeUsed));
+  const pool = Object.keys(ITEMS).filter((id) => !(id === "deepfake" && game.deepfakeUsed) && !BOOTH_ITEMS.includes(id));
   const size = SHOP_SIZE_MIN + Math.floor(Math.random() * (SHOP_SIZE_MAX - SHOP_SIZE_MIN + 1));
   return shuffle(pool).slice(0, size);
 }
@@ -255,7 +261,7 @@ function rollShop(game) {
 // 한 사람에게 지금 쓸 수 있는 경제 정보 전송
 function sendEconomy(game, p) {
   if (!p.connected) return;
-  const shop = game.night.shop;
+  const shop = game.night?.shop || { open: false, items: [], sold: {} }; // 1일차 낮엔 아직 밤이 없었음
   io.to(p.id).emit("economy", {
     credits: p.credits,
     players: alivePlayers(game).filter((t) => t !== p).map((t) => t.name),
@@ -297,14 +303,22 @@ function nightPlayer(socket) {
   return { game, me };
 }
 
-// 카지노(도박·채굴): 밤, 또는 독대 시간에 부스 밖에 있는 사람(대기실·대화를 끝낸 사람)
+// 카지노(도박·채굴): 낮에만
 function casinoPlayer(socket) {
   const game = games[socket.data.code];
-  if (!game) return null;
+  if (!game || game.phase !== "day") return null;
   const me = findPlayer(game, socket.id);
   if (!me || !me.alive) return null;
-  if (game.phase === "night" || (game.phase === "talk" && !me.room)) return { game, me };
-  return null;
+  return { game, me };
+}
+
+// 송금: 낮과 밤 모두 가능
+function moneyPlayer(socket) {
+  const game = games[socket.data.code];
+  if (!game || (game.phase !== "day" && game.phase !== "night")) return null;
+  const me = findPlayer(game, socket.id);
+  if (!me || !me.alive) return null;
+  return { game, me };
 }
 
 // 1 이상, 가진 돈 이하의 정수만 허용
@@ -412,7 +426,7 @@ function transfer(game, me, data) {
 
   me.credits -= amount;
   target.credits += amount;
-  game.night.transfers.push({ from: me.id, to: target.id, amount });
+  if (game.phase === "night") game.night.transfers.push({ from: me.id, to: target.id, amount }); // 송금 로그는 밤 송금만
   econMsg(me, target.name + "에게 " + amount + "만 크레딧을 보냈다.");
   econMsg(target, me.name + "에게서 " + amount + "만 크레딧을 받았다.");
   sendStatus(game);
@@ -442,7 +456,7 @@ function gamble(game, me, data) {
 // =====================================================
 //  채굴 미션 (카지노)
 //  서버가 문제를 내고 정답을 채점 → 화면을 조작해도 크레딧을 거저 얻을 수 없음
-//  밤 한 번, 독대 시간 한 번마다 미션 5개. 갈수록 어렵고 보상도 커짐
+//  낮마다 미션 5개. 갈수록 어렵고 보상도 커짐
 // =====================================================
 const MINE_REWARDS = [2, 2, 3, 3, 5]; // 미션별 보상 (만)
 const MINE_SECONDS = 10; // 문제 하나 제한 시간
@@ -458,16 +472,16 @@ const MINE_PLAN = [
 const HEX = "0123456789ABCDEF";
 const randHex = (n) => Array.from({ length: n }, () => HEX[Math.floor(Math.random() * 16)]).join("");
 
-// 지금 단계(밤 / 독대)의 내 채굴 기록. 단계가 바뀌면 새로 시작
+// 오늘 낮의 내 채굴 기록. 날이 바뀌면 새로 시작
 function mineState(game, p) {
-  const key = game.day + ":" + (game.phase === "talk" ? "talk" : "night");
+  const key = String(game.day);
   if (!p.mine || p.mine.key !== key) p.mine = { key, done: 0, challenge: null, lockUntil: 0 };
   return p.mine;
 }
 
 function mineStart(game, me) {
   const m = mineState(game, me);
-  if (m.done >= MINE_REWARDS.length) return io.to(me.id).emit("mineResult", { error: "이번 시간의 채굴 미션을 모두 끝냈다." });
+  if (m.done >= MINE_REWARDS.length) return io.to(me.id).emit("mineResult", { error: "오늘의 채굴 미션을 모두 끝냈다." });
   const wait = m.lockUntil - Date.now();
   if (wait > 0) return io.to(me.id).emit("mineResult", { error: "과열! " + Math.ceil(wait / 1000) + "초 뒤에 다시 시도" });
 
@@ -532,10 +546,13 @@ function startGame(game) {
   assignRoles(game);
   sendBoard(game);
 
-  // 시작 연출: 이륙 → 직업 카드 공개. 끝나면 첫날 밤
+  // 시작 연출: 이륙 → 직업 카드 공개. 끝나면 1일차 낮
   const seconds = sec(INTRO_SECONDS);
   sendPhase(game, { phase: "intro", title: "탑승", seconds, shipName: "레비아탄" });
-  schedule(game, seconds, () => startNight(game));
+  schedule(game, seconds, () => {
+    game.day = 1;
+    startDay(game);
+  });
 }
 
 // 방송으로 보여줄 시간: 줄 수에 맞춰 늘어남
@@ -544,10 +561,9 @@ function sequenceSeconds(sequence, min) {
   return sec(Math.max(min, Math.ceil(3.5 + total))); // 3.5초: 단계 타이틀 카드 + 여유
 }
 
-// ----- 1. 밤 -----
-// 직업 능력, 암상인 상점, 다크넷, 송금, 도박
+// ----- 3. 밤 -----
+// 직업 능력, 1:1 메신저, 암상인 상점, 다크넷, 송금
 function startNight(game) {
-  game.day++;
   game.night = {
     actions: {},
     attackVotes: {}, // 신디케이트 공격 투표 { 투표한 사람 id: 대상 id }
@@ -555,19 +571,10 @@ function startNight(game) {
     services: [], // 다크넷 서비스, 아침에 결과가 나오는 아이템
     transfers: [],
     deepfake: null,
+    dms: [], // 1:1 메신저 기록 { from, to, text } (사망자 관전용)
     shop: { items: rollShop(game), sold: {}, open: false, timers: [] },
   };
   game.tomorrow = emptyDayEffects(); // 오늘 밤에 산 "내일 효과" 아이템
-
-  // 매 턴 수입 (+ 크립토 채굴기)
-  for (const p of alivePlayers(game)) {
-    p.credits += p.role === "vip" ? VIP_INCOME : BASE_INCOME;
-    if (p.miner > 0) {
-      p.credits += MINER_INCOME;
-      p.miner--;
-    }
-  }
-  sendStatus(game);
 
   const seconds = sec(game.settings.nightSeconds);
 
@@ -576,22 +583,26 @@ function startNight(game) {
   game.night.shop.timers.push(setTimeout(() => openShop(game), arrive * 1000));
   for (const p of alivePlayers(game)) sendEconomy(game, p);
 
-  sendPhase(game, { phase: "night", title: "밤 · 객실 시간", seconds }, (p) => {
-    if (!p.alive) return { info: "당신은 사망했습니다. 관전 중..." };
+  const contacts = alivePlayers(game).map((p) => p.name);
+  sendPhase(game, { phase: "night", title: "밤 · 통행금지", seconds }, (p) => {
+    if (!p.alive) return { info: "관전 중. 메신저에서 모든 1:1 대화를 볼 수 있습니다.", dm: { spectate: true } };
     const info = p.team === "syndicate"
-      ? "암호화 채널이 열렸습니다. 공격 투표로 대상을 정하세요. 표가 갈리면 50% 확률로만 공격합니다."
-      : "객실에서 밤을 보냅니다.";
-    return { canChat: p.team === "syndicate", info, action: nightOptions(game, p) };
+      ? "암호화 채널이 열렸습니다. 공격 투표로 대상을 정하세요. 1:1 대화는 메신저 앱에서."
+      : "통행금지 시간. 능력을 쓰고, 메신저 앱으로 1:1 대화를 나누세요.";
+    return {
+      canChat: p.team === "syndicate", // 아래 입력창 = 신디케이트 채널. 1:1 대화는 메신저 앱 안에서
+      info,
+      action: nightOptions(game, p),
+      dm: { contacts: contacts.filter((n) => n !== p.name) },
+    };
   });
 
   schedule(game, seconds, () => startMorning(game));
 }
 
-// ----- 2. 아침 발표 -----
+// ----- 4. 아침 발표 (CCTV) -----
 function startMorning(game) {
-  game.history.clear(); // 오늘 만난 짝 기록 초기화
-  game.waited.clear();
-
+  game.day++; // 아침이 오면 새 날
   closeShop(game); // 결정 못 한 구매 요청을 마저 처리하고 상점 닫기
   game.today = game.tomorrow; // 어젯밤 산 "내일 효과"가 오늘 적용됨
 
@@ -602,11 +613,9 @@ function startMorning(game) {
   // 선내 방송 순서: { text } 는 글자만, { type, name } 이 있으면 복도에서 애니메이션도 재생
   const left = game.landingDays - game.day;
   const sequence = [];
-  if (game.day === 1) sequence.push({ text: "카지노 비행선이 이륙했다." });
   if (night.events.length) sequence.push(...night.events);
   else sequence.push({ text: night.lines[0] });
   sequence.push({ text: left === 0 ? "오늘 밤, 비행선이 착륙한다." : "착륙까지 " + left + "일 남았다." });
-  if (game.day === 1) sequence.push({ text: "오늘은 투표가 없습니다. 서로를 알아보세요." });
   const lines = sequence.map((s) => s.text);
 
   const seconds = sequenceSeconds(sequence, MORNING_SECONDS);
@@ -616,193 +625,45 @@ function startMorning(game) {
 
   // 밤 사이 승부가 났어도(예: VIP 사망) 아침 방송과 복도 연출을 끝까지 보여준 뒤 종료
   schedule(game, seconds, () => {
-    if (!endIfWinner(game)) startRound(game, 1);
+    if (!endIfWinner(game)) startDay(game);
   });
 }
 
-// ----- 3. 독대 -----
-
-// 짝 만들기: 오늘 이미 만난 짝, 이미 대기실에 있었던 사람을 최대한 피함
-// forced: 호스트가 지정한 짝 [id, id] (1라운드에만)
-function makePairs(game, forced) {
-  let ids = alivePlayers(game).map((p) => p.id);
-  if (forced) ids = ids.filter((id) => !forced.includes(id));
-  let best = null;
-  let bestScore = Infinity; // 점수가 낮을수록 좋은 매칭
-
-  for (let t = 0; t < 100; t++) {
-    const order = shuffle([...ids]);
-    const pairs = forced ? [forced] : [];
-    let score = 0;
-
-    for (let i = 0; i + 1 < order.length; i += 2) {
-      if (game.history.has(pairKey(order[i], order[i + 1]))) score++;
-      pairs.push([order[i], order[i + 1]]);
-    }
-
-    // 홀수면 마지막 사람이 대기실
-    const waiting = order.length % 2 === 1 ? order[order.length - 1] : null;
-    if (waiting && game.waited.has(waiting)) score++;
-
-    if (score < bestScore) {
-      best = { pairs, waiting };
-      bestScore = score;
-      if (score === 0) break; // 완벽한 매칭이면 바로 멈춤
+// ----- 1. 낮 -----
+// 카지노 + 그룹 채팅 + 송금. 매일 낮이 시작될 때 수입이 들어옴
+function startDay(game) {
+  for (const p of alivePlayers(game)) {
+    p.credits += p.role === "vip" ? VIP_INCOME : BASE_INCOME;
+    if (p.miner > 0) {
+      p.credits += MINER_INCOME;
+      p.miner--;
     }
   }
-  return best;
-}
+  sendStatus(game);
 
-// 독대 1라운드에서 보이스 마스크를 산 사람은 "???"로 보임
-function displayName(game, p) {
-  return game.round === 1 && game.today.masks.has(p.id) ? "???" : p.name;
-}
-
-// 독대 1라운드에서 재머에 걸린 사람은 말할 수 없음
-function isJammed(game, p) {
-  return game.phase === "talk" && game.round === 1 && game.today.jams.has(p.id);
-}
-
-// 모든 플레이어를 지난 라운드의 밀담 부스에서 내보냄 (관전도 끝)
-function leaveAllBooths(game) {
-  for (const p of game.players) {
-    const s = io.sockets.sockets.get(p.id);
-    if (s && p.room) s.leave(p.room);
-    p.room = null;
-    p.spectating = null;
-  }
-  game.booths = [];
-  game.boothLog = {};
-}
-
-// 관전 중인 사망자에게 부스 대화 전달 (실명으로. 사망자는 말을 못 하니 정보가 새지 않음)
-function tellSpectators(game, room, msg) {
-  for (const p of game.players) {
-    if (p.spectating === room) io.to(p.id).emit("chat", { ...msg, channel: "spectate" });
-  }
-}
-
-function startRound(game, round) {
-  const total = game.settings.talkRounds;
-  const seconds = sec(game.settings.talkSeconds);
-
-  game.round = round;
-  leaveAllBooths(game);
-
-  // 호스트가 주선한 만남은 1라운드에 (둘 다 살아있을 때만)
-  let forced = null;
-  if (round === 1 && game.forcedPair && game.forcedPair.every((id) => findPlayer(game, id)?.alive)) {
-    forced = game.forcedPair;
-  }
-
-  const { pairs, waiting } = makePairs(game, forced);
-  const partnerOf = {}; // { 내 id: 상대 이름 }
-  const boothOf = {}; // { 내 id: 부스 번호 }
-
-  pairs.forEach(([aId, bId], i) => {
-    const room = "pair:" + game.code + ":" + game.day + ":" + round + ":" + i; // 밀담 부스 이름
-    const a = findPlayer(game, aId);
-    const b = findPlayer(game, bId);
-
-    a.room = room;
-    b.room = room;
-    io.sockets.sockets.get(aId)?.join(room);
-    io.sockets.sockets.get(bId)?.join(room);
-    game.history.add(pairKey(aId, bId));
-    partnerOf[aId] = displayName(game, b);
-    partnerOf[bId] = displayName(game, a);
-    boothOf[aId] = boothOf[bId] = i + 1;
-    game.booths.push({ no: i + 1, room, names: [a.name, b.name] });
-  });
-  if (waiting) game.waited.add(waiting);
-
-  // 각자에게 "네 상대는 누구"라고 따로 알려줌
-  sendPhase(game, { phase: "talk", title: "독대 " + round + " / " + total, seconds, round, total }, (p) => {
-    if (!p.alive) {
-      return {
-        info: "관전 중. 밀담 부스를 골라 대화를 엿볼 수 있습니다.",
-        spectate: game.booths.map((b) => ({ no: b.no, names: b.names })),
-      };
-    }
-    if (partnerOf[p.id]) {
-      const notes = [];
-      if (forced && forced.includes(p.id)) notes.push("호스트가 주선한 만남");
-      if (round === 1 && game.today.masks.has(p.id)) notes.push("보이스 마스크 작동 중: 상대에게 ???로 보임");
-      const jammed = isJammed(game, p);
-      if (jammed) notes.push("재밍당해 이번 라운드는 말할 수 없다");
-
-      let info = "밀담 상대: " + partnerOf[p.id] + (notes.length ? " (" + notes.join(", ") + ")" : "");
-      const tapped = round === 1 && findPlayer(game, game.today.wiretaps[p.id]);
-      if (tapped && tapped.alive) info += " · 도청기: " + tapped.name + "의 대화를 엿듣는 중";
-      // 밀담 부스 화면에 쓰는 정보 (글자 대신 배지로 보여줌)
-      const booth = {
-        no: boothOf[p.id],
-        hosted: !!(forced && forced.includes(p.id)),
-        masked: round === 1 && game.today.masks.has(p.id),
-        jammed,
-        wiretap: tapped && tapped.alive ? tapped.name : null,
-      };
-      return { canChat: !jammed, partner: partnerOf[p.id], info, booth };
-    }
-    const tapped = round === 1 && findPlayer(game, game.today.wiretaps[p.id]);
+  const seconds = sec(game.settings.daySeconds);
+  const voteToday = game.day >= 2;
+  sendPhase(game, { phase: "day", title: "낮 · 카지노 라운지", seconds, voteToday }, (p) => {
+    if (!p.alive) return { info: "관전 중. 그룹 채팅을 볼 수 있습니다." };
+    const first = game.day === 1 ? "카지노 비행선이 이륙했다. 오늘은 투표가 없습니다. " : "";
     return {
-      info: "이번 라운드는 대기실입니다. 카지노에서 시간을 보낼 수 있습니다.",
+      canChat: true,
       canCasino: true,
-      booth: { no: 0, waiting: true, wiretap: tapped && tapped.alive ? tapped.name : null },
+      info: first + "그룹 채팅으로 이야기하고, 카지노에서 크레딧을 벌어 두세요." + (voteToday ? " 낮이 끝나면 투표." : ""),
     };
   });
-
-  if (waiting) sendEconomy(game, findPlayer(game, waiting)); // 대기실 사람: 채굴 남은 횟수 갱신
+  sendEconomyAll(game); // 채굴 남은 횟수 등 오늘 기준으로
 
   schedule(game, seconds, () => {
-    if (round < total) startRound(game, round + 1);
-    else {
-      leaveAllBooths(game);
-      startSpeech(game);
-    }
+    if (voteToday) startVote(game);
+    else endDay(game);
   });
 }
 
-// ----- 4. 공개 발언 -----
-// 생존자를 섞어서 한 명씩 차례로. 발언자만 전체에게 말할 수 있음
-function startSpeech(game) {
-  game.speechOrder = shuffle(alivePlayers(game).map((p) => p.id));
-  game.speechIndex = -1;
-  nextSpeaker(game);
-}
-
-function nextSpeaker(game) {
-  game.speechIndex++;
-
-  // 발언하기 전에 나간 사람은 건너뜀
-  while (game.speechIndex < game.speechOrder.length) {
-    const p = findPlayer(game, game.speechOrder[game.speechIndex]);
-    if (p && p.alive) break;
-    game.speechIndex++;
-  }
-
-  if (game.speechIndex >= game.speechOrder.length) {
-    game.speakerId = null;
-    if (game.day >= 2) startVote(game);
-    else endDay(game); // 1일차는 투표 없음
-    return;
-  }
-
-  const speaker = findPlayer(game, game.speakerId = game.speechOrder[game.speechIndex]);
-  const seconds = sec(game.settings.speechSeconds);
-  const order = game.speechIndex + 1 + " / " + game.speechOrder.length;
-
-  sendPhase(game, { phase: "speech", title: "공개 발언 " + order, seconds, speaker: speaker.name }, (p) => {
-    if (p === speaker) return { canChat: true, isSpeaker: true, info: "당신의 발언 차례입니다. 모두가 듣고 있습니다." };
-    return { info: speaker.name + " 님이 발언 중입니다." };
-  });
-
-  schedule(game, seconds, () => nextSpeaker(game));
-}
-
-// ----- 5. 투표 (2일차부터) -----
+// ----- 2. 투표 (2일차부터) -----
 function startVote(game) {
   game.votes = {}; // { 투표한 사람 id: 찍은 사람 id }
+  game.voteClosing = false;
   const seconds = sec(VOTE_SECONDS);
   const candidates = alivePlayers(game).map((p) => p.name);
 
@@ -816,6 +677,17 @@ function startVote(game) {
   });
 
   schedule(game, seconds, () => resolveVote(game));
+}
+
+// 살아있는 사람이 모두 투표했으면 곧바로 마감
+function checkAllVoted(game) {
+  if (game.phase !== "vote" || game.voteClosing) return;
+  const alive = alivePlayers(game);
+  if (alive.length && alive.every((p) => game.votes[p.id])) {
+    game.voteClosing = true;
+    io.to("game:" + game.code).emit("voteClosing", VOTE_EARLY_SECONDS);
+    schedule(game, VOTE_EARLY_SECONDS, () => resolveVote(game));
+  }
 }
 
 function resolveVote(game) {
@@ -869,7 +741,7 @@ function resolveVote(game) {
   });
 }
 
-// ----- 6. 하루 끝: 착륙일이면 착륙, 아니면 다음 밤 -----
+// ----- 하루 끝: 착륙일이면 착륙, 아니면 다음 밤 -----
 function endDay(game) {
   if (game.day >= game.landingDays) return land(game);
   startNight(game);
@@ -910,7 +782,6 @@ function land(game) {
 function endGame(game, winner, reason, soloWinner) {
   clearTimeout(game.timer);
   if (game.night) for (const t of game.night.shop.timers) clearTimeout(t); // 밤 중에 끝나면 상점 타이머도 정리
-  leaveAllBooths(game);
 
   const won = (p) => (soloWinner ? p === soloWinner : p.team === winner);
 
@@ -943,7 +814,6 @@ function backToLobby(game) {
     p.role = null;
     p.team = null;
     p.alive = true;
-    p.room = null;
     p.bountyTarget = null;
     p.credits = 0;
     p.cooldowns = {};
@@ -954,7 +824,6 @@ function backToLobby(game) {
   game.phase = "lobby";
   game.day = 0;
   game.poisoned = [];
-  game.forcedPair = null;
   game.fixedVoter = null;
   game.fixerUsedDay = null;
   if (!findPlayer(game, game.hostId)) game.hostId = game.players[0].id;
@@ -1002,10 +871,6 @@ io.on("connection", (socket) => {
         day: 0,
         round: 0,
         settings: defaultSettings(),
-        history: new Set(), // 오늘 이미 만난 짝
-        waited: new Set(), // 오늘 이미 대기실에 있었던 사람
-        booths: [], // 이번 라운드 밀담 부스 { no, room, names }
-        boothLog: {}, // 부스별 대화 기록 (관전용)
         timer: null,
       };
       games[code] = game;
@@ -1020,10 +885,32 @@ io.on("connection", (socket) => {
     let color = 0;
     while (used.has(color)) color++;
 
-    game.players.push({ id: socket.id, name, color, avatar: cleanAvatar(data?.avatar), room: null, role: null, team: null, alive: true, connected: true });
+    game.players.push({ id: socket.id, name, color, avatar: cleanAvatar(data?.avatar), role: null, team: null, alive: true, connected: true });
     socket.data.code = code;
     socket.data.name = name;
     socket.join("game:" + code);
+    lobbyLog(game, name + " 님이 탑승했습니다." + (game.hostId === socket.id ? " (방장)" : ""));
+    sendLobby(game);
+  });
+
+  // 로비 채팅 (로비에 있는 동안만)
+  on("lobbyChat", (text) => {
+    const game = games[socket.data.code];
+    if (!game || game.phase !== "lobby") return;
+    const me = findPlayer(game, socket.id);
+    const clean = String(text ?? "").trim().slice(0, 200);
+    if (!me || !clean) return;
+    io.to("game:" + game.code).emit("lobbyChat", { fromId: me.id, from: me.name, text: clean });
+  });
+
+  // 방장 넘기기 (방장만, 로비에서만)
+  on("transferHost", (name) => {
+    const game = hostLobby();
+    if (!game) return;
+    const to = game.players.find((p) => p.name === name);
+    if (!to || to.id === socket.id) return;
+    game.hostId = to.id;
+    lobbyLog(game, socket.data.name + " 님이 " + to.name + " 님에게 방장을 넘겼습니다.");
     sendLobby(game);
   });
 
@@ -1079,29 +966,26 @@ io.on("connection", (socket) => {
 
     if (game.phase === "night" && me.team === "syndicate") {
       io.to("syn:" + game.code).emit("chat", { ...msg, channel: "syndicate" });
-    } else if (game.phase === "talk" && me.room) {
-      if (isJammed(game, me)) return;
-      const booth = { ...msg, from: displayName(game, me), channel: "booth" };
-      io.to(me.room).emit("chat", booth);
-      // 관전용 기록 (실명) + 지금 보고 있는 사망자에게 전달
-      const log = (game.boothLog[me.room] = game.boothLog[me.room] || []);
-      log.push({ from: me.name, text: clean });
-      if (log.length > 100) log.shift();
-      tellSpectators(game, me.room, { fromId: null, from: me.name, text: clean });
-
-      // 도청기: 이 부스에 도청 대상이 있으면 도청한 사람에게도 몰래 전달 (1라운드만)
-      if (game.round === 1) {
-        for (const tapperId in game.today.wiretaps) {
-          const target = findPlayer(game, game.today.wiretaps[tapperId]);
-          const tapper = findPlayer(game, tapperId);
-          if (!target || !tapper || !tapper.alive || target.room !== me.room || tapper.room === me.room) continue;
-          io.to(tapperId).emit("chat", { ...booth, fromId: null, channel: "wiretap" });
-        }
-      }
-    } else if (game.phase === "speech" && game.speakerId === me.id) {
-      io.to("game:" + game.code).emit("chat", { ...msg, channel: "speech" });
+    } else if (game.phase === "day") {
+      io.to("game:" + game.code).emit("chat", { ...msg, channel: "group" }); // 그룹 채팅 (사망자도 읽기만)
     }
-    // 그 외(대기실, 남의 발언 차례 등)는 무시
+    // 그 외(밤의 일반 승객, 투표 시간 등)는 무시. 밤 1:1 대화는 "dm"으로
+  });
+
+  // 밤 1:1 메신저: 보낸 사람과 받는 사람에게만. 사망자는 모든 대화를 관전
+  on("dm", (data) => {
+    const game = games[socket.data.code];
+    if (!game || game.phase !== "night") return;
+    const me = findPlayer(game, socket.id);
+    const to = game.players.find((p) => p.name === data?.to);
+    if (!me || !me.alive || !to || !to.alive || to === me) return;
+    const text = String(data?.text ?? "").trim().slice(0, 200);
+    if (!text) return;
+    const msg = { fromId: me.id, from: me.name, to: to.name, text, channel: "dm" };
+    game.night.dms.push({ from: me.name, to: to.name, text });
+    io.to(me.id).emit("dm", msg);
+    io.to(to.id).emit("dm", msg);
+    for (const p of game.players) if (!p.alive && p.connected) io.to(p.id).emit("dm", { ...msg, spectate: true });
   });
 
   // 밤 행동 선택 (밤이 끝나기 전까지 바꿀 수 있음)
@@ -1158,7 +1042,7 @@ io.on("connection", (socket) => {
     if (ctx) useService(ctx.game, ctx.me, data);
   });
   on("transfer", (data) => {
-    const ctx = nightPlayer(socket);
+    const ctx = moneyPlayer(socket);
     if (ctx) transfer(ctx.game, ctx.me, data);
   });
   on("gamble", (data) => {
@@ -1174,49 +1058,6 @@ io.on("connection", (socket) => {
     if (ctx) mineAnswer(ctx.game, ctx.me, data);
   });
 
-  // 사망자: 관전할 밀담 부스 고르기 → 지금까지의 대화를 받고, 이후 대화도 계속 받음
-  on("spectateBooth", (no) => {
-    const game = games[socket.data.code];
-    if (!game || game.phase !== "talk") return;
-    const me = findPlayer(game, socket.id);
-    if (!me || me.alive) return;
-    const booth = game.booths.find((b) => b.no === Number(no));
-    if (!booth) return;
-    me.spectating = booth.room;
-    socket.emit("spectateLog", {
-      no: booth.no,
-      names: booth.names,
-      msgs: game.boothLog[booth.room] || [],
-      ended: !game.players.some((p) => p.room === booth.room),
-    });
-  });
-
-  // 밀담 부스에서 대화 끝내기: 한 명이 나가면 부스가 닫히고 둘 다 대기 상태(카지노 이용 가능)
-  on("leaveBooth", () => {
-    const game = games[socket.data.code];
-    if (!game || game.phase !== "talk") return;
-    const me = findPlayer(game, socket.id);
-    if (!me || !me.alive || !me.room) return;
-    const room = me.room;
-    const pair = game.players.filter((p) => p.room === room);
-    for (const p of pair) {
-      io.sockets.sockets.get(p.id)?.leave(room);
-      p.room = null;
-    }
-    for (const p of game.players) if (p.spectating === room) io.to(p.id).emit("spectateEnded", { by: me.name });
-    for (const p of pair) {
-      io.to(p.id).emit("boothEnded", { byMe: p === me, by: displayName(game, me) });
-      sendEconomy(game, p); // 채굴 남은 횟수 등 최신 정보
-    }
-  });
-
-  // 발언자가 일찍 끝내기
-  on("endSpeech", () => {
-    const game = games[socket.data.code];
-    if (!game || game.phase !== "speech" || game.speakerId !== socket.id) return;
-    nextSpeaker(game);
-  });
-
   // 투표 (마감 전까지 바꿀 수 있음)
   on("vote", (targetName) => {
     const game = games[socket.data.code];
@@ -1228,6 +1069,7 @@ io.on("connection", (socket) => {
 
     game.votes[me.id] = target.id;
     socket.emit("voted", target.name);
+    checkAllVoted(game);
   });
 
   on("backToLobby", () => {
@@ -1253,7 +1095,6 @@ io.on("connection", (socket) => {
 
     const me = findPlayer(game, socket.id);
     if (!me) return;
-    if (me.room) io.to(me.room).emit("partnerLeft", me.name);
 
     if (game.phase === "lobby") {
       game.players = game.players.filter((p) => p !== me);
@@ -1270,14 +1111,18 @@ io.on("connection", (socket) => {
       delete games[game.code];
       return;
     }
-    if (game.hostId === socket.id) game.hostId = online[0].id; // 방장 넘기기
+    const wasHost = game.hostId === socket.id;
+    if (wasHost) game.hostId = online[0].id; // 방장 넘기기
 
-    if (game.phase === "lobby") return sendLobby(game);
+    if (game.phase === "lobby") {
+      lobbyLog(game, me.name + " 님이 내렸습니다." + (wasHost ? " 새 방장: " + findPlayer(game, game.hostId).name : ""));
+      return sendLobby(game);
+    }
 
     sendBoard(game);
     if (game.phase === "over") return;
     if (endIfWinner(game)) return; // 나간 사람이 VIP나 마지막 신디케이트였다면 바로 판정
-    if (game.phase === "speech" && game.speakerId === me.id) nextSpeaker(game);
+    checkAllVoted(game); // 투표 중에 나갔으면 남은 사람이 다 찍었는지 다시 확인
   });
 });
 

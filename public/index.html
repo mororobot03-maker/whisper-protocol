@@ -32,26 +32,38 @@
       <button id="join-btn" class="primary">탑승하기</button>
     </section>
 
-    <!-- 2. 로비 화면 -->
-    <section id="lobby-screen" class="screen hidden">
-      <div class="lobby-head">
-        <span>방 코드 <strong id="lobby-code"></strong></span>
-        <span id="player-count"></span>
+    <!-- 2. 로비 화면: PC에서는 왼쪽(승객·채팅·시작) / 오른쪽(규칙·직업) 두 칸 -->
+    <section id="lobby-screen" class="screen lobby hidden">
+      <div class="lobby-col lobby-left">
+        <div class="lobby-head">
+          <span>방 코드 <strong id="lobby-code"></strong></span>
+          <span id="player-count"></span>
+        </div>
+        <ul id="player-list"></ul>
+
+        <div class="lobby-chat">
+          <ul id="lobby-log" class="lobby-log"></ul>
+          <form id="lobby-form" class="lobby-form">
+            <input id="lobby-input" placeholder="로비 채팅" maxlength="200" autocomplete="off">
+            <button class="small" type="submit">전송</button>
+          </form>
+        </div>
+
+        <ul id="check-errors" class="errors"></ul>
+        <button id="start-btn" class="primary hidden">게임 시작</button>
+        <p id="lobby-note">방장이 시작하기를 기다리는 중...</p>
       </div>
-      <ul id="player-list"></ul>
 
-      <h2>게임 규칙</h2>
-      <div id="option-list" class="option-list"></div>
+      <div class="lobby-col lobby-right">
+        <h2>게임 규칙</h2>
+        <div id="option-list" class="option-list"></div>
 
-      <div class="section-head">
-        <h2>직업 구성</h2>
+        <div class="section-head">
+          <h2>직업 구성</h2>
+        </div>
+        <p id="role-summary" class="summary"></p>
+        <div id="role-list"></div>
       </div>
-      <p id="role-summary" class="summary"></p>
-      <div id="role-list"></div>
-
-      <ul id="check-errors" class="errors"></ul>
-      <button id="start-btn" class="primary hidden">게임 시작</button>
-      <p id="lobby-note">방장이 시작하기를 기다리는 중...</p>
     </section>
 
     <!-- 3. 게임 화면
@@ -92,7 +104,8 @@
 
       <!-- 탭 버튼 (단계에 따라 보이는 탭이 달라짐) -->
       <nav id="tabs" class="tabs">
-        <button data-tab="chat"><i data-icon="appChat"></i><span>채팅</span><i class="dot"></i></button>
+        <button data-tab="chat"><i data-icon="appChat"></i><span id="chat-tab-label">채팅</span><i class="dot"></i></button>
+        <button data-tab="dm"><i data-icon="talk"></i><span>메신저</span><i class="dot"></i></button>
         <button data-tab="info"><i data-icon="appInfo"></i><span>내 정보</span><i class="dot"></i></button>
         <button data-tab="action"><i data-icon="appAction"></i><span>능력</span><i class="dot"></i></button>
         <button data-tab="shop"><i data-icon="appShop"></i><span>암상인</span><i class="dot"></i></button>
@@ -105,36 +118,32 @@
 
       <!-- 채팅 (PC에서는 항상 보임) -->
       <section class="pane pane-chat" data-pane="chat">
-        <!-- 원형 지도 무대: 공개 발언·투표 때 채팅 위에 지도를 띄움 (말풍선, 눌러서 투표) -->
+        <!-- 원형 지도 무대: 낮·투표 때 채팅 위에 지도를 띄움 (그룹 채팅 말풍선, 눌러서 투표) -->
         <div id="map-stage" class="map-stage hidden">
           <div class="map-stage-head"><span id="stage-title"></span><span id="stage-hint" class="stage-hint"></span></div>
           <div id="map-stage-slot" class="map-stage-slot"></div>
-        </div>
-        <!-- 밀담 부스: 독대 시간에만 보임. 나(왼쪽)와 상대(오른쪽)가 마주 앉음 -->
-        <div id="booth" class="booth-panel hidden" aria-live="polite">
-          <div class="booth-head">
-            <span id="booth-title" class="booth-title"></span>
-            <span class="booth-head-right">
-              <button id="booth-leave" class="booth-leave" type="button">대화 종료</button>
-              <span id="booth-rounds" class="booth-rounds" aria-label="라운드"></span>
-            </span>
-          </div>
-          <div class="booth-stage">
-            <span id="booth-sign" class="booth-sign">PRIVATE</span>
-            <div id="booth-me" class="seat me"></div>
-            <div class="booth-table" aria-hidden="true"><i></i><i></i></div>
-            <div id="booth-them" class="seat them"></div>
-            <div class="booth-door left" aria-hidden="true"></div>
-            <div class="booth-door right" aria-hidden="true"></div>
-            <div id="booth-closed" class="booth-closed"></div>
-          </div>
-          <div id="booth-badges" class="booth-badges"></div>
         </div>
         <div id="private-box" class="private-box hidden"></div>
         <ul id="chat-log"></ul>
       </section>
 
       <div class="panes">
+        <!-- 밤 1:1 메신저: 왼쪽 연락처, 오른쪽 대화 -->
+        <section class="pane app app-dm" data-pane="dm">
+          <div class="dm-head"><i data-icon="talk"></i><strong>LEVIA TALK</strong><span id="dm-state" class="dm-state"></span></div>
+          <div class="dm-body">
+            <ul id="dm-contacts" class="dm-contacts"></ul>
+            <div class="dm-room">
+              <div id="dm-with" class="dm-with">대화할 사람을 고르세요</div>
+              <ul id="dm-log" class="dm-log"></ul>
+              <form id="dm-form" class="dm-form">
+                <input id="dm-input" placeholder="1:1 메시지" maxlength="200" autocomplete="off">
+                <button id="dm-send" class="primary" type="submit">전송</button>
+              </form>
+            </div>
+          </div>
+        </section>
+
         <!-- 내 정보 -->
         <section class="pane app app-info" data-pane="info">
           <div id="role-card" class="role-card"></div>
@@ -270,7 +279,6 @@
           <input id="chat-input" placeholder="메시지 입력" maxlength="200" autocomplete="off">
           <button id="send-btn" class="primary">전송</button>
         </form>
-        <button id="end-speech-btn" class="primary hidden">발언 종료</button>
       </footer>
     </section>
 

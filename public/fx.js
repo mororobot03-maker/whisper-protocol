@@ -104,14 +104,14 @@ const map = {
 };
 
 // =====================================================
-//  지도 무대: 공개 발언·투표 때 채팅 칸 위에 지도를 크게
+//  지도 무대: 낮(그룹 채팅)·투표 때 채팅 칸 위에 지도를 크게
 // =====================================================
 const stage = {
   el: document.querySelector("#map-stage"),
   slot: document.querySelector("#map-stage-slot"),
   title: document.querySelector("#stage-title"),
   hint: document.querySelector("#stage-hint"),
-  mode: null, // "speech" | "vote" | null
+  mode: null, // "day" | "vote" | "result" | null
   speaker: null,
   votable: new Set(),
   picked: null,
@@ -146,15 +146,13 @@ function hideStage() {
   applyStageMarks();
 }
 
-// 발언자 강조, 투표 가능 / 내가 찍은 방 표시
+// 투표 가능 / 내가 찍은 방 표시
 function applyStageMarks() {
   for (const room of map.rooms.querySelectorAll(".mroom")) {
     const name = room.dataset.name;
-    room.classList.toggle("speaking", stage.mode === "speech" && name === stage.speaker);
     room.classList.toggle("votable", stage.mode === "vote" && stage.votable.has(name));
     room.classList.toggle("voted-pick", stage.mode === "vote" && name === stage.picked);
   }
-  map.el.classList.toggle("speech-mode", stage.mode === "speech");
   map.el.classList.toggle("vote-mode", stage.mode === "vote" && stage.votable.size > 0);
 }
 
@@ -174,11 +172,15 @@ function mapSay(name, text) {
   b.style.left = at.x + "px";
   b.style.top = at.y - room.offsetHeight / 2 - 4 + "px";
   // 지도 오른쪽/왼쪽 끝 방이면 꼬리 방향만 바꿈
-  const w = map.el.clientWidth;
-  if (at.x < w * 0.25) b.classList.add("left");
-  if (at.x > w * 0.75) b.classList.add("right");
+  const side = parseFloat(room.style.left) || 50; // 방이 지도 가로의 몇 % 위치인지
+  if (side < 30) b.classList.add("left");
+  if (side > 70) b.classList.add("right");
   map.fx.appendChild(b);
-  setTimeout(() => b.remove(), 6000);
+  room.classList.add("speaking");
+  setTimeout(() => {
+    b.remove();
+    if (!map.fx.querySelector('.map-bubble[data-name="' + CSS.escape(name) + '"]')) room.classList.remove("speaking");
+  }, 6000);
 }
 
 const replay = {
@@ -226,7 +228,7 @@ function renderMap(players) {
     room.appendChild(el("span", "mname", p.name));
     map.rooms.appendChild(room);
   });
-  if (typeof applyStageMarks === "function") applyStageMarks(); // 다시 그려도 발언자·투표 표시 유지
+  if (typeof applyStageMarks === "function") applyStageMarks(); // 다시 그려도 투표 표시 유지
 }
 
 function roomOf(name) {
@@ -471,7 +473,7 @@ function stopSequence() {
 
 // =====================================================
 //  단계 전환 타이틀 카드
-//  밤 → 아침 → 독대 → 발언 → 투표로 넘어갈 때 1.2초 동안 크게 보여줌
+//  낮 → 밤 → 아침 → 투표로 넘어갈 때 1.2초 동안 크게 보여줌
 // =====================================================
 const PHASE_CARD_MS = 1300;
 let cardTimer = null;
@@ -664,209 +666,4 @@ function showResult(data, isHost) {
 function hideResult() {
   fx.result.classList.add("hidden");
   fx.confetti.innerHTML = "";
-}
-
-// =====================================================
-//  5. 밀담 부스 (독대 시간)
-//  나는 왼쪽, 상대는 오른쪽에 마주 앉음
-//  라운드가 시작되면 부스 문이 닫혀 있다가 스르륵 열리며 상대가 드러남
-// =====================================================
-
-const boothUI = {
-  el: document.querySelector("#booth"),
-  title: document.querySelector("#booth-title"),
-  rounds: document.querySelector("#booth-rounds"),
-  sign: document.querySelector("#booth-sign"),
-  me: document.querySelector("#booth-me"),
-  them: document.querySelector("#booth-them"),
-  badges: document.querySelector("#booth-badges"),
-  leave: document.querySelector("#booth-leave"),
-  closed: document.querySelector("#booth-closed"),
-};
-let boothKey = ""; // 같은 라운드 정보가 다시 와도 문 연출을 반복하지 않으려고
-let boothDoorTimer = null;
-
-// 의자 하나 채우기: 캐릭터 + 이름표
-// kind: "player" | "masked"(???) | "empty"(대기실 빈 자리)
-function fillSeat(seat, name, kind, label) {
-  seat.innerHTML = "";
-  seat.className = "seat " + (seat === boothUI.me ? "me" : "them") + " " + kind;
-  seat.style.setProperty("--c", kind === "player" ? colorOf(name) : "#6b6b85");
-  const body = el("div", "seat-body");
-  if (kind === "player" && avatarByName[name]) body.appendChild(avatarImg(avatarByName[name], "seat-avatar"));
-  else if (kind === "masked") {
-    body.appendChild(el("span", "seat-mystery", "?"));
-  } else if (kind === "empty") {
-    body.appendChild(el("span", "seat-empty", "빈 자리"));
-  } else {
-    body.appendChild(el("span", "seat-mystery", (name || "?").charAt(0)));
-  }
-  seat.appendChild(body);
-  seat.appendChild(el("span", "seat-name", label));
-}
-
-function showBooth(data) {
-  const b = data.booth;
-  if (data.phase === "talk" && !data.alive && data.spectate) return showSpectate(data);
-  if (data.phase !== "talk" || !data.alive || !b) return hideBooth();
-  boothUI.el.classList.remove("spectate");
-  const ui = boothUI;
-  ui.el.classList.remove("hidden");
-  ui.el.classList.toggle("waiting", !!b.waiting);
-  ui.leave.classList.toggle("hidden", !!b.waiting); // 대기실엔 끝낼 대화가 없음
-  ui.title.textContent = b.waiting ? "대기실" : "밀담 부스 #" + b.no;
-  ui.sign.textContent = b.waiting ? "LOUNGE" : "PRIVATE";
-
-  // 라운드 점: ● 지난/지금, ○ 남은
-  ui.rounds.innerHTML = "";
-  for (let i = 1; i <= (data.total || 1); i++) {
-    ui.rounds.appendChild(el("i", i < data.round ? "done" : i === data.round ? "now" : ""));
-  }
-  ui.rounds.setAttribute("aria-label", "라운드 " + data.round + " / " + data.total);
-
-  fillSeat(ui.me, myName, "player", b.masked ? "나 (???로 보임)" : "나");
-  if (b.waiting) fillSeat(ui.them, null, "empty", "다음 라운드를 기다리는 중");
-  else if (data.partner === "???") fillSeat(ui.them, null, "masked", "???");
-  else fillSeat(ui.them, data.partner, "player", data.partner);
-  ui.el.classList.toggle("jammed", !!b.jammed);
-
-  // 배지: 이번 라운드에 걸린 특별한 상태
-  ui.badges.innerHTML = "";
-  const badge = (cls, text) => ui.badges.appendChild(el("span", "bbadge " + cls, text));
-  if (b.hosted) badge("hosted", "🤝 방장이 주선한 만남");
-  if (b.masked) badge("masked", "🎭 상대에게 ???로 보임");
-  if (b.jammed) badge("jammed", "📵 재밍: 이번 라운드는 말할 수 없음");
-  if (b.wiretap) badge("tap", "🎧 도청 중: " + b.wiretap);
-  if (b.waiting) addCasinoShortcut();
-
-  // 라운드가 바뀔 때만 문 연출 (타이틀 카드가 걷힐 즈음 문이 열림)
-  const key = data.day + ":" + data.round;
-  if (key !== boothKey) {
-    boothKey = key;
-    ui.el.classList.remove("open", "ended");
-    resetLeaveBtn();
-    ui.me.querySelector(".bubble")?.remove();
-    ui.them.querySelector(".bubble")?.remove();
-    clearTimeout(boothDoorTimer);
-    boothDoorTimer = setTimeout(() => {
-      ui.el.classList.add("open");
-      sound.play("door");
-    }, calm ? 0 : PHASE_CARD_MS * 0.7);
-  }
-}
-
-// 대화 종료: 문이 다시 닫히고 "CLOSED" 안내
-function endBooth(text) {
-  const ui = boothUI;
-  ui.el.classList.remove("open");
-  ui.el.classList.add("ended");
-  ui.leave.classList.add("hidden");
-  ui.closed.innerHTML = "";
-  ui.closed.appendChild(el("strong", null, "CLOSED"));
-  ui.closed.appendChild(el("span", null, text));
-  if (ui.el.classList.contains("spectate")) {
-    ui.closed.appendChild(el("small", null, "다른 부스를 골라 볼 수 있어요"));
-    return;
-  }
-  ui.closed.appendChild(el("small", null, "남은 시간은 카지노에서 보낼 수 있어요"));
-  addCasinoShortcut();
-}
-
-// 대기실·대화 종료 때: 카지노로 바로 가는 버튼
-function addCasinoShortcut() {
-  if (boothUI.badges.querySelector(".go-casino")) return;
-  const b = el("button", "bbadge go-casino", "🎰 카지노 열기 · 도박 · 채굴");
-  b.type = "button";
-  boothUI.badges.appendChild(b);
-}
-
-// 대화 종료 버튼: 실수로 누르지 않게 두 번 눌러야 함
-let leaveTimer = null;
-function resetLeaveBtn() {
-  clearTimeout(leaveTimer);
-  boothUI.leave.classList.remove("confirm");
-  boothUI.leave.textContent = "대화 종료";
-}
-function pressLeaveBtn() {
-  const btn = boothUI.leave;
-  if (!btn.classList.contains("confirm")) {
-    btn.classList.add("confirm");
-    btn.textContent = "정말 끝낼까요?";
-    clearTimeout(leaveTimer);
-    leaveTimer = setTimeout(resetLeaveBtn, 3000);
-    return false;
-  }
-  resetLeaveBtn();
-  return true; // 두 번째 클릭: 진짜 종료
-}
-
-// =====================================================
-//  사망자 관전: 부스를 골라 대화 엿보기
-// =====================================================
-let spectating = null; // { no, names }
-
-function showSpectate(data) {
-  const ui = boothUI;
-  spectating = null;
-  ui.el.classList.remove("hidden", "waiting", "jammed", "ended");
-  ui.el.classList.add("spectate", "open");
-  ui.leave.classList.add("hidden");
-  ui.title.textContent = "관전 · 부스를 고르세요";
-  ui.sign.textContent = "GHOST CAM";
-  ui.rounds.innerHTML = "";
-  for (let i = 1; i <= (data.total || 1); i++) ui.rounds.appendChild(el("i", i < data.round ? "done" : i === data.round ? "now" : ""));
-  fillSeat(ui.me, null, "empty", "");
-  fillSeat(ui.them, null, "empty", "");
-  ui.closed.innerHTML = "";
-  ui.badges.innerHTML = "";
-  if (!data.spectate.length) ui.badges.appendChild(el("span", "bbadge", "이번 라운드엔 열린 부스가 없어요"));
-  for (const bth of data.spectate) {
-    const btn = el("button", "bbadge spec-pick", "👁 부스 #" + bth.no + " · " + bth.names.join(" ↔ "));
-    btn.type = "button";
-    btn.dataset.no = bth.no;
-    ui.badges.appendChild(btn);
-  }
-}
-
-// 고른 부스의 두 사람을 앉히고, 지난 대화를 말풍선 없이 채팅 칸에 쌓음
-function enterSpectate(info) {
-  const ui = boothUI;
-  spectating = { no: info.no, names: info.names };
-  ui.title.textContent = "관전 · 밀담 부스 #" + info.no;
-  ui.el.classList.toggle("ended", !!info.ended);
-  fillSeat(ui.me, info.names[0], "player", info.names[0]);
-  fillSeat(ui.them, info.names[1], "player", info.names[1]);
-  for (const b of ui.badges.querySelectorAll(".spec-pick")) b.classList.toggle("on", Number(b.dataset.no) === info.no);
-  if (info.ended) {
-    ui.closed.innerHTML = "";
-    ui.closed.appendChild(el("strong", null, "CLOSED"));
-    ui.closed.appendChild(el("span", null, "이 부스는 대화가 끝났습니다"));
-  }
-}
-
-// 관전 중 말풍선: 이름으로 왼쪽/오른쪽 자리를 찾음
-function spectateSay(from, text) {
-  if (!spectating) return;
-  boothSay(from === spectating.names[0], text);
-}
-
-function hideBooth() {
-  spectating = null;
-  boothUI.el.classList.remove("spectate");
-  boothUI.el.classList.add("hidden");
-  boothUI.el.classList.remove("open");
-  boothKey = "";
-}
-
-// 말풍선: 말한 사람 머리 위에 잠깐 띄움
-function boothSay(mine, text) {
-  if (boothUI.el.classList.contains("hidden")) return;
-  const seat = mine ? boothUI.me : boothUI.them;
-  seat.querySelector(".bubble")?.remove();
-  const bubble = el("span", "bubble", text.length > 46 ? text.slice(0, 45) + "…" : text);
-  seat.appendChild(bubble);
-  seat.classList.remove("talking");
-  seat.getBoundingClientRect();
-  seat.classList.add("talking");
-  setTimeout(() => bubble.remove(), 4200);
 }
