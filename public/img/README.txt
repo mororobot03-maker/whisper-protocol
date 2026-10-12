@@ -11,7 +11,7 @@ bg/shop.jpg               암상인 화물칸 배경        1200x1600 (3:4)
 bg/casino.jpg             카지노 홀 배경            1200x1600 (3:4)
 key/airship.jpg           입장·로비 화면 비행선     1920x1080
 
-[v2용 — 아직 화면에 연결 전]
+[v2용]
 bg/casino_day.jpg         낮 카지노 홀 배경         1920x1080
 bg/auction.jpg            밤 경매장 앱 배경         1200x1600 (3:4)
 bg/cabin.jpg              밤 객실 배경              1920x1080

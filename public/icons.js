@@ -57,6 +57,12 @@ const ICON_PATHS = {
   mask: '<path d="M4 7.5c3-1.5 13-1.5 16 0 0 6-3.5 10-8 10s-8-4-8-10z"/><path d="M8 11.5c.8-.7 2-.7 2.8 0M13.2 11.5c.8-.7 2-.7 2.8 0"/><path d="M10.5 14.5h3"/>',
   jammer: '<path d="M12 12v9M8 21h8"/><path d="M8.5 8.5a5 5 0 0 1 7 0M5.5 5.5a9 9 0 0 1 13 0"/><path d="M4 3l16 16"/>',
   deepfake: '<rect x="2.5" y="5" width="19" height="13" rx="2"/><path d="M8 21h8"/><path d="M7 11.5h3l1.5-2.5 2 5 1.5-2.5h2"/>',
+  scramble: '<path d="M4 6h16M4 12h7M15 12h5M4 18h10"/><path d="M12 9l2 2-2 2M16 15l2 2-2 2"/>',
+  block: '<path d="M4 5.5h16a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 3.5V16.5H4A1.5 1.5 0 0 1 2.5 15V7A1.5 1.5 0 0 1 4 5.5z"/><path d="M8.5 8.5l7 5M15.5 8.5l-7 5"/>',
+  forge: '<path d="M3 6.5h12v9H3z"/><path d="M3 7l6 4.5L15 7"/><path d="M14 20l6.5-6.5-2-2L12 18v2z"/>',
+  commlog: '<rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="9" cy="9" r="1.6"/><circle cx="15" cy="9" r="1.6"/><path d="M10.6 9h2.8M8 14h8M8 17.5h5"/>',
+  speaker: '<path d="M3.5 10v4h3l7.5 4.5v-13L6.5 10h-3z"/><path d="M17.5 8.5a5 5 0 0 1 0 7M20 6a8.5 8.5 0 0 1 0 12"/><path d="M10 2.5l-2 3"/>',
+  gavel: '<path d="M13.5 3.5l6 6M11 6l6 6M12.2 4.8l-4.4 4.4 6 6 4.4-4.4"/><path d="M10.5 12.5L4 19l1.5 1.5L12 14"/><path d="M13 21h8"/>',
   bribe: '<path d="M3 13.5l4-3.5 4 2.5 2-1"/><path d="M21 13.5l-4-3.5-3.5 1-4 3.5a1.4 1.4 0 0 0 2 2l2-1.5 3 3 2-2"/><path d="M3 13.5l5 5 1.5-1.5"/>',
   miner: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8.5" y="8.5" width="7" height="7" rx="1"/><path d="M8.5 2v2M15.5 2v2M8.5 20v2M15.5 20v2M2 8.5h2M2 15.5h2M20 8.5h2M20 15.5h2"/>',
 

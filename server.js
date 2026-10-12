@@ -10,8 +10,8 @@ const { Server } = require("socket.io");
 const { ROLES, TEAM_NAMES, OPTIONS, defaultSettings, teamPlan, rolePool, generateRoles, autoLandingDays } = require("./roles");
 const { maxHp, nightOptions, resolveNight } = require("./night");
 const {
-  ITEMS, DEEPFAKE_TEMPLATES, SERVICES, GAMBLES,
-  SHOP_SIZE_MIN, SHOP_SIZE_MAX, MINER_INCOME, MINER_TURNS,
+  ITEMS, DEEPFAKE_TEMPLATES, SERVICES, SERVICE_NIGHT_LIMIT, servicePrice, AUCTION, bidStep, GAMBLES,
+  MINER_INCOME, MINER_TURNS,
 } = require("./economy");
 
 const app = express();
@@ -182,10 +182,11 @@ function assignRoles(game) {
     p.hp = maxHp(p);
     p.credits = DEV_START_CREDITS || game.settings.startCredits; // 방장이 정한 시작 자금
     p.credits += ROLES[p.role].startBonus || 0; // 스폰서 추가 자금
-    p.cooldowns = {}; // 다크넷 서비스 그룹별 "다시 쓸 수 있는 날"
+    p.svcUses = {}; // 다크넷 서비스별 이용 횟수 (쓸수록 비싸짐)
     p.miner = 0; // 크립토 채굴기 남은 턴
   });
   game.deepfakeUsed = false;
+  game.itemSeq = 0;
   game.today = emptyDayEffects();
 
   // 도플갱어: 조사에 보일 가짜 시민팀 직업을 게임 시작 때 하나 정해둠 (나올 수 있는 직업 중에서)
@@ -238,48 +239,40 @@ function sendStatus(game) {
 }
 
 // =====================================================
-//  경제: 암상인 상점, 다크넷, 송금, 도박 (전부 밤에만)
+//  경제: 경매장, 다크넷, 송금(낮·밤), 카지노(낮)
 // =====================================================
 
-// 낮에 적용되는 아이템 효과 묶음
+// 다음 날 낮에 적용되는 아이템 효과 묶음 (뇌물)
 function emptyDayEffects() {
-  return { wiretaps: {}, masks: new Set(), jams: new Set(), bribes: new Set() };
+  return { bribes: new Set() };
 }
 
-// 독대(밀담 부스) 전용이던 아이템: v2에서 독대가 없어져 진열하지 않음 (2단계 경매에서 새 아이템으로 교체)
-const BOOTH_ITEMS = ["wiretap", "mask", "jammer"];
-
-// 오늘 밤 진열할 아이템 5~6개 (딥페이크는 게임당 1회라 이미 쓰였으면 제외)
-function rollShop(game) {
-  // 테스트용: SHOP_ITEMS=proxy,jammer 처럼 지정하면 그 아이템만 진열
-  if (process.env.SHOP_ITEMS) return process.env.SHOP_ITEMS.split(",").filter((id) => ITEMS[id]);
-  const pool = Object.keys(ITEMS).filter((id) => !(id === "deepfake" && game.deepfakeUsed) && !BOOTH_ITEMS.includes(id));
-  const size = SHOP_SIZE_MIN + Math.floor(Math.random() * (SHOP_SIZE_MAX - SHOP_SIZE_MIN + 1));
-  return shuffle(pool).slice(0, size);
+// 1:1 메신저 해킹 상태 묶음 (밤마다 새로)
+function emptyHacks() {
+  return { taps: {}, scramble: new Set(), block: new Set() }; // taps = { 대상 id: Set(도청한 사람 id) }
 }
 
-// 한 사람에게 지금 쓸 수 있는 경제 정보 전송
+// 한 사람에게 지금 쓸 수 있는 경제 정보 전송 (다크넷 가격, 송금 대상, 카지노, 채굴)
 function sendEconomy(game, p) {
   if (!p.connected) return;
-  const shop = game.night?.shop || { open: false, items: [], sold: {} }; // 1일차 낮엔 아직 밤이 없었음
+  const night = game.night;
+  const usedTonight = game.phase === "night" && night ? night.svcCount[p.id] || 0 : 0;
   io.to(p.id).emit("economy", {
     credits: p.credits,
+    available: available(game, p),
     players: alivePlayers(game).filter((t) => t !== p).map((t) => t.name),
     everyone: alivePlayers(game).map((t) => t.name),
-    shop: {
-      open: shop.open,
-      items: shop.items.map((id) => ({ id, ...ITEMS[id], sold: !!shop.sold[id] })),
-    },
     services: Object.keys(SERVICES).map((id) => {
       const s = SERVICES[id];
-      const readyDay = Math.max(p.cooldowns[s.group] || 0, s.minDay || 0); // 쿨다운, 사용 가능 시작일 중 늦은 쪽
-      return { id, ...s, waitDays: Math.max(0, readyDay - game.day) };
+      const uses = p.svcUses[id] || 0;
+      let lock = "";
+      if (s.minDay && game.day < s.minDay) lock = s.minDay + "일차부터";
+      else if (id === "drone" && p.hp >= maxHp(p)) lock = "체력 가득";
+      return { id, name: s.name, desc: s.desc, target: s.target, price: servicePrice(id, uses), uses, lock };
     }),
-    gambles: Object.keys(GAMBLES).map((id) => ({
-      id,
-      ...GAMBLES[id],
-      chance: GAMBLES[id].chance,
-    })),
+    svcLeft: SERVICE_NIGHT_LIMIT - usedTonight,
+    svcLimit: SERVICE_NIGHT_LIMIT,
+    gambles: Object.keys(GAMBLES).map((id) => ({ id, ...GAMBLES[id] })),
     deepfakeTemplates: { injured: "OOO가 부상을 입었다!", healed: "리퍼닥이 OOO을(를) 치료했다!" },
     mine: { done: mineState(game, p).done, total: MINE_REWARDS.length, next: MINE_REWARDS[mineState(game, p).done] || 0 },
   });
@@ -327,81 +320,303 @@ function validAmount(value, max) {
   return Number.isInteger(n) && n >= 1 && n <= max ? n : null;
 }
 
-function openShop(game) {
-  if (game.phase !== "night" || game.night.shop.open) return;
-  game.night.shop.open = true;
-  for (const p of alivePlayers(game)) econMsg(p, "화물칸 해치가 열렸다. 암상인 \"고스트\"가 도착했다.");
-  sendEconomyAll(game);
+// 지금 쓸 수 있는 돈 = 가진 돈 - 지금 최고가로 입찰 중인 금액 (낙찰되면 내야 하니 묶어 둠)
+function available(game, p) {
+  const lot = game.phase === "night" && game.night?.auction?.live;
+  return p.credits - (lot && lot.leader === p.id ? lot.price : 0);
 }
 
-// 구매: 먼저 누른 사람이 바로 가져감 (선착순)
-// 서버는 요청을 한 번에 하나씩 처리하므로, 거의 동시에 눌러도 먼저 도착한 요청이 이김
-function requestBuy(game, me, data) {
-  const shop = game.night.shop;
-  const id = data?.item;
-  const item = own(ITEMS, id);
-  if (!shop.open) return econMsg(me, "암상인이 아직 도착하지 않았다.");
-  if (!item || !shop.items.includes(id)) return;
-  if (shop.sold[id]) return econMsg(me, "다른 손님이 " + item.name + "을(를) 먼저 가져갔다.");
-  if (me.credits < item.price) return econMsg(me, "크레딧이 부족하다.");
+// =====================================================
+//  경매장 (밤)
+//  매일 밤 5건, 건당 20초, 공개 오름 경매. 연장 없음
+//  무엇이 팔렸는지는 모두 공개, 누가 샀는지는 비공개 (입찰자는 "입찰자 A" 같은 익명 표시)
+//  1인당 하룻밤 낙찰 2건까지
+// =====================================================
 
-  // 대상 확인
+// 오늘 밤 출품할 5건 (딥페이크는 게임당 1회라 이미 나왔으면 제외)
+function rollLots(game) {
+  // 테스트용: AUCTION_ITEMS=wiretap,forge 처럼 지정하면 그 아이템부터 출품
+  const forced = process.env.AUCTION_ITEMS ? process.env.AUCTION_ITEMS.split(",").filter((id) => own(ITEMS, id)) : [];
+  const pool = shuffle(Object.keys(ITEMS).filter((id) => !forced.includes(id) && !(id === "deepfake" && game.deepfakeUsed)));
+  return [...forced, ...pool].slice(0, AUCTION.lots);
+}
+
+function startAuction(game) {
+  const night = game.night;
+  const letters = shuffle(alivePlayers(game).map((p) => p.id)); // 오늘 밤 익명 표시: 입찰자 A, B, C …
+  night.auction = {
+    lots: rollLots(game).map((id) => ({ id, status: "pending", price: ITEMS[id].price, leader: null, endsAt: 0 })),
+    index: -1,
+    live: null,
+    wins: {}, // { id: 낙찰 수 }
+    alias: Object.fromEntries(letters.map((id, i) => [id, "입찰자 " + "ABCDEFGHIJ"[i]])),
+    timers: [],
+  };
+  night.auction.timers.push(setTimeout(() => nextLot(game), AUCTION.startDelay * 1000));
+  sendAuctionAll(game);
+}
+
+function nextLot(game) {
+  const a = game.night && game.night.auction;
+  if (!a || game.phase !== "night") return;
+  a.index++;
+  if (a.index >= a.lots.length) {
+    a.live = null;
+    sendAuctionAll(game, { event: "done" });
+    return;
+  }
+  const lot = a.lots[a.index];
+  lot.status = "live";
+  lot.endsAt = Date.now() + AUCTION.lotSeconds * 1000;
+  a.live = lot;
+  if (lot.id === "deepfake") game.deepfakeUsed = true; // 출품되면 다시 나오지 않음
+  sendAuctionAll(game, { event: "lot" });
+  a.timers.push(setTimeout(() => endLot(game, lot), AUCTION.lotSeconds * 1000));
+}
+
+function endLot(game, lot) {
+  const a = game.night && game.night.auction;
+  if (!a || a.live !== lot) return;
+  a.live = null;
+  const winner = findPlayer(game, lot.leader);
+  if (winner && winner.alive && winner.credits >= lot.price) {
+    lot.status = "sold";
+    winner.credits -= lot.price;
+    a.wins[winner.id] = (a.wins[winner.id] || 0) + 1;
+    giveItem(game, winner, lot.id, lot.price);
+    sendStatus(game);
+  } else {
+    lot.status = "unsold";
+    lot.leader = null;
+  }
+  sendAuctionAll(game, { event: lot.status, item: lot.id });
+  sendEconomyAll(game); // 묶여 있던 돈 풀림
+  a.timers.push(setTimeout(() => nextLot(game), AUCTION.gapSeconds * 1000));
+}
+
+function stopAuction(game) {
+  const a = game.night && game.night.auction;
+  if (!a) return;
+  for (const t of a.timers) clearTimeout(t);
+  a.timers = [];
+  a.live = null;
+}
+
+// 입찰: 현재가 + 입찰 단위 이상, 쓸 수 있는 돈 이하. 자기가 이미 최고가면 못 올림
+function placeBid(game, me, data) {
+  const a = game.night.auction;
+  const lot = a && a.live;
+  if (!lot || Number(data?.index) !== a.index) return econMsg(me, "지금 진행 중인 경매가 아니다.");
+  if ((a.wins[me.id] || 0) >= AUCTION.winLimit) return econMsg(me, "오늘 밤 낙찰 한도(" + AUCTION.winLimit + "건)를 다 채웠다.");
+  if (lot.leader === me.id) return econMsg(me, "이미 최고가 입찰자다.");
+  const item = ITEMS[lot.id];
+  const min = lot.leader ? lot.price + bidStep(item) : item.price;
+  const amount = Number(data?.amount);
+  if (!Number.isInteger(amount) || amount < min) return econMsg(me, "최소 " + min + "만부터 입찰할 수 있다.");
+  if (amount > me.credits) return econMsg(me, "크레딧이 부족하다. (보유 " + me.credits + "만)");
+
+  const prev = findPlayer(game, lot.leader);
+  lot.price = amount;
+  lot.leader = me.id;
+  sendAuctionAll(game, { event: "bid" });
+  if (prev && prev !== me) {
+    econMsg(prev, ITEMS[lot.id].name + ": 더 높은 입찰이 들어왔다. (" + amount + "만)");
+    sendEconomy(game, prev);
+  }
+  sendEconomy(game, me);
+}
+
+// 경매 상태: 사람마다 "내가 최고가인지", 내 낙찰 수가 다르므로 한 명씩
+function sendAuctionAll(game, extra = {}) {
+  for (const p of game.players) if (p.connected) sendAuction(game, p, extra);
+}
+
+function sendAuction(game, p, extra = {}) {
+  const a = game.night && game.night.auction;
+  if (!a) return;
+  const now = Date.now();
+  io.to(p.id).emit("auction", {
+    ...extra,
+    index: a.index,
+    winLimit: AUCTION.winLimit,
+    myWins: a.wins[p.id] || 0,
+    lotSeconds: AUCTION.lotSeconds,
+    lots: a.lots.map((lot) => {
+      const item = ITEMS[lot.id];
+      return {
+        id: lot.id,
+        name: item.name,
+        cat: item.cat,
+        desc: item.desc,
+        pitch: item.pitch,
+        when: item.when,
+        start: item.price,
+        step: bidStep(item),
+        status: lot.status,
+        price: lot.price,
+        leader: lot.leader ? a.alias[lot.leader] || "입찰자 ?" : null,
+        mine: lot.leader === p.id,
+        left: lot.status === "live" ? Math.max(0, lot.endsAt - now) : 0,
+      };
+    }),
+  });
+}
+
+// ----- 낙찰품 -----
+// 대상이 필요 없는 아이템은 바로 발동, 대상이 필요하면 "내 낙찰품"에 넣고 고르게 함
+function giveItem(game, p, id, paid) {
+  const item = ITEMS[id];
+  econMsg(p, item.name + " 낙찰! (-" + paid + "만)" + (item.target === "none" ? " 효과가 바로 적용됐다." : " 경매장 아래 \"내 낙찰품\"에서 대상을 골라 사용하세요."));
+  if (item.target === "none") return applyItem(game, p, id, {});
+  const uid = ++game.itemSeq;
+  game.night.inventory.push({ uid, owner: p.id, id });
+  sendInventory(game, p);
+}
+
+function sendInventory(game, p) {
+  const list = game.phase === "night" && game.night ? game.night.inventory.filter((it) => it.owner === p.id) : [];
+  io.to(p.id).emit("inventory", list.map((it) => ({ uid: it.uid, id: it.id, name: ITEMS[it.id].name, target: ITEMS[it.id].target, desc: ITEMS[it.id].desc })));
+}
+
+// 낙찰품 사용: 아이템 종류에 맞는 값만 받음
+function useItem(game, me, data) {
+  const inv = game.night.inventory;
+  const it = inv.find((x) => x.uid === Number(data?.uid) && x.owner === me.id);
+  if (!it) return;
+  const item = ITEMS[it.id];
+  const alive = (name) => game.players.find((p) => p.name === name && p.alive);
   const payload = {};
-  if (item.target === "player" || item.target === "deepfake") {
-    const t = game.players.find((p) => p.name === data.target && p.alive);
+
+  if (item.target === "player" || item.target === "deepfake" || item.target === "forge") {
+    const t = alive(data.target);
     if (!t) return;
-    if (item.target === "player" && t === me) return econMsg(me, "자기 자신은 고를 수 없다.");
+    if (item.target !== "deepfake" && t === me) return econMsg(me, "자기 자신은 고를 수 없다.");
     payload.target = t.id;
   }
   if (item.target === "deepfake") {
     if (!own(DEEPFAKE_TEMPLATES, data.kind)) return;
     payload.kind = data.kind;
   }
+  if (item.target === "forge") {
+    const to = alive(data.to);
+    if (!to || to.id === payload.target) return econMsg(me, "받는 사람을 다시 고르세요.");
+    payload.to = to.id;
+  }
+  if (item.target === "forge" || item.target === "text") {
+    const text = String(data.text ?? "").trim().slice(0, 80);
+    if (!text) return econMsg(me, "보낼 문장을 입력하세요.");
+    payload.text = text;
+  }
 
-  me.credits -= item.price;
-  shop.sold[id] = true;
-  applyItem(game, me, id, payload);
+  game.night.inventory = inv.filter((x) => x !== it);
+  applyItem(game, me, it.id, payload);
+  sendInventory(game, me);
+}
 
-  econMsg(me, item.name + " 구매 완료! (-" + item.price + "만)");
-  sendStatus(game);
-  sendEconomyAll(game); // 모두에게 솔드아웃 표시 (구매자 이름은 비공개)
+// 오늘 밤 이 사람에게 방화벽이 켜져 있는지
+function hasFirewall(game, p) {
+  const set = game.night.effects[p.id];
+  return !!(set && set.has("firewall"));
+}
+
+// 채팅 해킹이 방화벽에 막혔는지 확인하고, 막혔으면 양쪽에 알림
+function hackBlocked(game, by, target, name) {
+  if (!hasFirewall(game, target)) return false;
+  econMsg(by, name + ": " + target.name + "의 방화벽에 막혔다.");
+  econMsg(target, "방화벽이 누군가의 채팅 해킹을 막아냈다.");
+  return true;
 }
 
 // 아이템 효과 등록
 function applyItem(game, p, id, payload) {
   const night = game.night;
-  const tomorrow = game.tomorrow;
-  if (["proxy", "firewall", "armor", "decoy", "launder"].includes(id)) {
+  const hacks = night.hacks;
+  const item = ITEMS[id];
+  const t = payload.target ? findPlayer(game, payload.target) : null;
+
+  if (["proxy", "firewall", "armor", "decoy"].includes(id)) {
     (night.effects[p.id] = night.effects[p.id] || new Set()).add(id);
   } else if (id === "scanner") night.services.push({ type: "scanner", by: p.id, target: payload.target });
   else if (id === "translog") night.services.push({ type: "translog", by: p.id });
-  else if (id === "wiretap") tomorrow.wiretaps[p.id] = payload.target;
-  else if (id === "mask") tomorrow.masks.add(p.id);
-  else if (id === "jammer") tomorrow.jams.add(payload.target);
-  else if (id === "bribe") tomorrow.bribes.add(p.id);
+  else if (id === "bribe") game.tomorrow.bribes.add(p.id);
   else if (id === "miner") p.miner += MINER_TURNS;
-  else if (id === "deepfake") {
-    night.deepfake = { kind: payload.kind, target: payload.target };
-    game.deepfakeUsed = true;
+  else if (id === "deepfake") night.deepfake = { kind: payload.kind, target: payload.target };
+  else if (id === "speaker") night.speaker.push(payload.text);
+  else if (id === "commlog") {
+    if (hackBlocked(game, p, t, item.name)) return;
+    night.commlogs.push({ by: p.id, target: t.id });
+  } else if (id === "wiretap") {
+    if (hackBlocked(game, p, t, item.name)) return;
+    (hacks.taps[t.id] = hacks.taps[t.id] || new Set()).add(p.id);
+    // 이미 오간 대화도 넘겨줌
+    const past = night.dms.filter((m) => !m.forged && (m.from === t.name || m.to === t.name));
+    io.to(p.id).emit("tapLog", { target: t.name, msgs: past });
+  } else if (id === "scramble") {
+    if (hackBlocked(game, p, t, item.name)) return;
+    hacks.scramble.add(t.id);
+  } else if (id === "block") {
+    if (hackBlocked(game, p, t, item.name)) return;
+    hacks.block.add(t.id);
+    econMsg(t, "통신이 차단됐다! 오늘 밤엔 더 이상 1:1 메시지를 보낼 수 없다.");
+  } else if (id === "forge") {
+    if (hackBlocked(game, p, t, item.name)) return;
+    const to = findPlayer(game, payload.to);
+    deliverDM(game, t, to, payload.text, { forgedBy: p });
+    econMsg(p, "메시지 위조 완료: " + t.name + "인 척 " + to.name + "에게 보냈다.");
+    return;
+  }
+  if (item.target !== "none") {
+    const who = t ? " → " + t.name : "";
+    econMsg(p, item.name + " 사용" + who + (item.when === "morning" ? ". 결과는 아침에." : item.when === "now" ? ". 오늘 밤 동안 작동." : "."));
   }
 }
 
-// 밤이 끝날 때: 상점 도착 타이머 정리하고 닫기
-function closeShop(game) {
-  const shop = game.night.shop;
-  for (const t of shop.timers) clearTimeout(t);
-  shop.timers = [];
-  shop.open = false;
+// 1:1 메시지 전달 (해킹 효과 반영)
+//  forgedBy: 메시지 위조로 보낸 경우 실제로 보낸 사람
+function deliverDM(game, from, to, text, opt = {}) {
+  const hacks = game.night.hacks;
+  const night = game.night;
+  // 채팅 교란: 보내는 사람이 교란당했으면 받는 쪽에는 글자 일부가 깨져 보임 (보낸 사람 화면은 원문)
+  const shown = !opt.forgedBy && hacks.scramble.has(from.id) ? scrambleText(text) : text;
+  const msg = { fromId: from.id, from: from.name, to: to.name, text: shown, channel: "dm" };
+  night.dms.push({ from: from.name, to: to.name, text: shown, forged: !!opt.forgedBy });
+  if (!opt.forgedBy) io.to(from.id).emit("dm", { ...msg, text });
+  io.to(to.id).emit("dm", msg);
+  if (opt.forgedBy) io.to(opt.forgedBy.id).emit("dm", { ...msg, forged: true });
+
+  // 도청: 보낸 사람이나 받는 사람을 도청 중인 사람에게 사본 (대화 당사자는 제외)
+  if (!opt.forgedBy) {
+    const tappers = new Set([...(hacks.taps[from.id] || []), ...(hacks.taps[to.id] || [])]);
+    for (const id of tappers) {
+      const tapper = findPlayer(game, id);
+      if (!tapper || !tapper.alive || id === from.id || id === to.id) continue;
+      const target = hacks.taps[from.id]?.has(id) ? from.name : to.name;
+      io.to(id).emit("dm", { ...msg, tap: target });
+    }
+  }
+  // 사망자 관전 (위조는 위조라고 표시)
+  for (const p of game.players) {
+    if (!p.alive && p.connected) io.to(p.id).emit("dm", { ...msg, spectate: true, forged: !!opt.forgedBy });
+  }
 }
 
-// 다크넷 서비스
+// 글자 40%를 ▒로 (공백은 그대로)
+function scrambleText(text) {
+  return [...text].map((ch) => (ch !== " " && Math.random() < 0.4 ? "▒" : ch)).join("");
+}
+
+// ----- 다크넷 서비스 -----
+// 하룻밤 2건까지, 같은 서비스는 쓸 때마다 ×1.5
 function useService(game, me, data) {
   const id = data?.service;
   const s = own(SERVICES, id);
   if (!s) return;
+  const night = game.night;
+  const price = servicePrice(id, me.svcUses[id]);
   if (s.minDay && game.day < s.minDay) return econMsg(me, s.name + ": " + s.minDay + "일차 밤부터 쓸 수 있다.");
-  if ((me.cooldowns[s.group] || 0) > game.day) return econMsg(me, s.name + ": 아직 쿨다운 중이다.");
-  if (me.credits < s.price) return econMsg(me, "크레딧이 부족하다.");
+  if ((night.svcCount[me.id] || 0) >= SERVICE_NIGHT_LIMIT) return econMsg(me, "다크넷은 하룻밤 " + SERVICE_NIGHT_LIMIT + "건까지만 이용할 수 있다.");
+  if (id === "drone" && me.hp >= maxHp(me)) return econMsg(me, "의료 드론: 체력이 가득이라 치료할 곳이 없다.");
+  if (available(game, me) < price) return econMsg(me, "크레딧이 부족하다." + (available(game, me) < me.credits ? " (입찰 중인 금액은 쓸 수 없음)" : ""));
 
   let target = null;
   if (s.target) {
@@ -409,10 +624,11 @@ function useService(game, me, data) {
     if (!target || target === me) return;
   }
 
-  me.credits -= s.price;
-  me.cooldowns[s.group] = game.day + s.cooldown;
-  game.night.services.push({ type: id, by: me.id, target: target ? target.id : null });
-  econMsg(me, s.name + " 의뢰 완료 (-" + s.price + "만)" + (target ? " → " + target.name : "") + ". 결과는 아침에.");
+  me.credits -= price;
+  me.svcUses[id] = (me.svcUses[id] || 0) + 1;
+  night.svcCount[me.id] = (night.svcCount[me.id] || 0) + 1;
+  night.services.push({ type: id, by: me.id, target: target ? target.id : null });
+  econMsg(me, s.name + " 의뢰 완료 (-" + price + "만)" + (target ? " → " + target.name : "") + ". 결과는 아침에. 다음 가격 " + servicePrice(id, me.svcUses[id]) + "만");
   sendStatus(game);
   sendEconomy(game, me);
 }
@@ -420,9 +636,9 @@ function useService(game, me, data) {
 // 송금: 바로 전달되고, 받는 사람은 보낸 사람을 알게 됨
 function transfer(game, me, data) {
   const target = game.players.find((p) => p.name === data?.target && p.alive);
-  const amount = validAmount(data?.amount, me.credits);
+  const amount = validAmount(data?.amount, available(game, me)); // 입찰 중인 금액은 보낼 수 없음
   if (!target || target === me) return;
-  if (!amount) return econMsg(me, "송금액을 확인하세요. (1 ~ " + me.credits + "만)");
+  if (!amount) return econMsg(me, "송금액을 확인하세요. (1 ~ " + available(game, me) + "만)");
 
   me.credits -= amount;
   target.credits += amount;
@@ -562,7 +778,7 @@ function sequenceSeconds(sequence, min) {
 }
 
 // ----- 3. 밤 -----
-// 직업 능력, 1:1 메신저, 암상인 상점, 다크넷, 송금
+// 직업 능력, 1:1 메신저, 경매장, 다크넷, 송금
 function startNight(game) {
   game.night = {
     actions: {},
@@ -571,17 +787,17 @@ function startNight(game) {
     services: [], // 다크넷 서비스, 아침에 결과가 나오는 아이템
     transfers: [],
     deepfake: null,
-    dms: [], // 1:1 메신저 기록 { from, to, text } (사망자 관전용)
-    shop: { items: rollShop(game), sold: {}, open: false, timers: [] },
+    dms: [], // 1:1 메신저 기록 { from, to, text, forged } (사망자 관전 · 도청 · 통신 기록용)
+    hacks: emptyHacks(), // 채팅 도청 · 교란 · 차단
+    inventory: [], // 대상을 아직 안 고른 낙찰품 { uid, owner, id }
+    commlogs: [], // 통신 기록 열람 { by, target }
+    speaker: [], // 선내 스피커 해킹 문장 (내일 아침 방송)
+    svcCount: {}, // 오늘 밤 다크넷 이용 수 { id: n }
+    auction: null,
   };
   game.tomorrow = emptyDayEffects(); // 오늘 밤에 산 "내일 효과" 아이템
 
   const seconds = sec(game.settings.nightSeconds);
-
-  // 암상인은 밤 시간의 15%~50% 사이 랜덤한 때 도착
-  const arrive = seconds * (0.15 + Math.random() * 0.35);
-  game.night.shop.timers.push(setTimeout(() => openShop(game), arrive * 1000));
-  for (const p of alivePlayers(game)) sendEconomy(game, p);
 
   const contacts = alivePlayers(game).map((p) => p.name);
   sendPhase(game, { phase: "night", title: "밤 · 통행금지", seconds }, (p) => {
@@ -597,16 +813,35 @@ function startNight(game) {
     };
   });
 
+  startAuction(game);
+  sendEconomyAll(game);
+  for (const p of alivePlayers(game)) sendInventory(game, p);
+
   schedule(game, seconds, () => startMorning(game));
 }
 
 // ----- 4. 아침 발표 (CCTV) -----
 function startMorning(game) {
   game.day++; // 아침이 오면 새 날
-  closeShop(game); // 결정 못 한 구매 요청을 마저 처리하고 상점 닫기
+  stopAuction(game); // 밤이 끝나면 경매도 끝 (진행 중이던 건은 유찰)
   game.today = game.tomorrow; // 어젯밤 산 "내일 효과"가 오늘 적용됨
 
   const night = resolveNight(game);
+  const tell = (id, text) => (night.priv[id] = night.priv[id] || []).push(text);
+
+  // 통신 기록 열람: 대상이 밤새 대화한 상대 (위조 메시지는 대상이 보낸 게 아니라 빠짐)
+  for (const c of game.night.commlogs) {
+    const t = findPlayer(game, c.target);
+    const partners = new Set();
+    for (const m of game.night.dms) {
+      if (m.forged) continue;
+      if (m.from === t.name) partners.add(m.to);
+      if (m.to === t.name) partners.add(m.from);
+    }
+    tell(c.by, "통신 기록: " + t.name + "이(가) 어젯밤 대화한 사람 → " + (partners.size ? [...partners].join(", ") : "아무도 없음"));
+  }
+  // 쓰지 않은 낙찰품은 사라짐
+  for (const it of game.night.inventory) tell(it.owner, ITEMS[it.id].name + "을(를) 쓰지 않아 효과 없이 사라졌다.");
   sendBoard(game);
   sendStatus(game);
 
@@ -615,7 +850,9 @@ function startMorning(game) {
   const sequence = [];
   if (night.events.length) sequence.push(...night.events);
   else sequence.push({ text: night.lines[0] });
-  sequence.push({ text: left === 0 ? "오늘 밤, 비행선이 착륙한다." : "착륙까지 " + left + "일 남았다." });
+  // 선내 스피커 해킹: 출처 불명 방송
+  for (const text of game.night.speaker) sequence.push({ text: "[출처 불명 방송] " + text });
+  sequence.push({ text: left === 0 ? "오늘 투표가 끝나면 비행선이 착륙한다." : "착륙까지 " + left + "일 남았다." });
   const lines = sequence.map((s) => s.text);
 
   const seconds = sequenceSeconds(sequence, MORNING_SECONDS);
@@ -781,7 +1018,7 @@ function land(game) {
 // soloWinner: 제3세력은 팀이 아니라 그 사람 한 명만 이김
 function endGame(game, winner, reason, soloWinner) {
   clearTimeout(game.timer);
-  if (game.night) for (const t of game.night.shop.timers) clearTimeout(t); // 밤 중에 끝나면 상점 타이머도 정리
+  stopAuction(game); // 밤 중에 끝나면 경매 타이머도 정리
 
   const won = (p) => (soloWinner ? p === soloWinner : p.team === winner);
 
@@ -816,7 +1053,7 @@ function backToLobby(game) {
     p.alive = true;
     p.bountyTarget = null;
     p.credits = 0;
-    p.cooldowns = {};
+    p.svcUses = {};
     p.miner = 0;
   }
   game.today = emptyDayEffects();
@@ -981,11 +1218,8 @@ io.on("connection", (socket) => {
     if (!me || !me.alive || !to || !to.alive || to === me) return;
     const text = String(data?.text ?? "").trim().slice(0, 200);
     if (!text) return;
-    const msg = { fromId: me.id, from: me.name, to: to.name, text, channel: "dm" };
-    game.night.dms.push({ from: me.name, to: to.name, text });
-    io.to(me.id).emit("dm", msg);
-    io.to(to.id).emit("dm", msg);
-    for (const p of game.players) if (!p.alive && p.connected) io.to(p.id).emit("dm", { ...msg, spectate: true });
+    if (game.night.hacks.block.has(me.id)) return socket.emit("dmBlocked");
+    deliverDM(game, me, to, text);
   });
 
   // 밤 행동 선택 (밤이 끝나기 전까지 바꿀 수 있음)
@@ -1032,10 +1266,14 @@ io.on("connection", (socket) => {
     socket.emit("actionSet", label + ": " + what);
   });
 
-  // ----- 경제 (밤에만) -----
-  on("buy", (data) => {
+  // ----- 경제 -----
+  on("bid", (data) => {
     const ctx = nightPlayer(socket);
-    if (ctx) requestBuy(ctx.game, ctx.me, data);
+    if (ctx) placeBid(ctx.game, ctx.me, data);
+  });
+  on("useItem", (data) => {
+    const ctx = nightPlayer(socket);
+    if (ctx) useItem(ctx.game, ctx.me, data);
   });
   on("darknet", (data) => {
     const ctx = nightPlayer(socket);

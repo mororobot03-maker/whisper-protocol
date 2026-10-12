@@ -52,8 +52,6 @@ const timerFill = document.querySelector("#timer-fill");
 const meRole = document.querySelector("#me-role");
 const intelLog = document.querySelector("#intel-log");
 const tabs = document.querySelector("#tabs");
-const shopState = document.querySelector("#shop-state");
-const shopList = document.querySelector("#shop-list");
 const darknetList = document.querySelector("#darknet-list");
 const transferBtn = document.querySelector("#transfer-btn");
 const betAmount = document.querySelector("#bet-amount");
@@ -175,7 +173,7 @@ function setupTabs(data) {
     dm: data.phase === "night", // 사망자도 관전용으로 열림
     info: true,
     action: night,
-    shop: night,
+    auction: data.phase === "night", // 사망자도 구경은 가능
     darknet: night,
     bank: night || day,
     casino: day,
@@ -423,27 +421,12 @@ document.querySelector("#mrooms").addEventListener("click", onRoomClick);
 let lastEco = null; // 가장 최근 경제 정보 (다시 그리기용)
 let myCredits = 0;
 
-// 아이템별 아이콘 이름과 효과 시점 (화면 표시용)
-const ITEM_TIMING = {
-  proxy: "tonight", firewall: "tonight", armor: "tonight", decoy: "tonight", launder: "tonight",
-  wiretap: "tomorrow", mask: "tomorrow", jammer: "tomorrow", bribe: "tomorrow",
-  scanner: "inbox", translog: "inbox", deepfake: "inbox", miner: "multi",
-};
-const TIMING_LABEL = { tonight: "오늘 밤", tomorrow: "내일 낮", inbox: "아침에 결과", multi: "3턴 동안" };
+// 아이템 효과 시점 (화면 표시용)
+const WHEN_LABEL = { now: "즉시 · 오늘 밤", tonight: "오늘 밤", morning: "아침에 결과", tomorrow: "내일 투표", multi: "3일 동안" };
+const CAT_LABEL = { hack: "해킹", defense: "방어", info: "정보·기타" };
 
-// 고스트 대사: 매일 밤 하나씩 (꾸미기용)
-const GHOST_LINES = [
-  "오늘은 물건이 좀 귀하지.",
-  "돈만 있으면 못 구할 게 없어.",
-  "누가 뭘 샀는지는 나만 알지.",
-  "빨리 골라. 순찰이 돌 시간이야.",
-  "어젯밤 손님은 운이 없었지.",
-  "이번 물건은 진짜야. 아마도.",
-];
-let ghostDay = -1;
-
-// 대상을 고르는 작은 얼굴 목록 (상점, 다크넷 공용)
-// picker = { kind: "shop"|"svc", id, step } : 지금 열려 있는 선택 칸
+// 대상을 고르는 작은 얼굴 목록 (경매 낙찰품, 다크넷 공용)
+// picker = { kind: "svc", id } : 다크넷에서 지금 열려 있는 선택 칸
 let picker = null;
 
 function peoplePicker(names, onPick) {
@@ -462,65 +445,270 @@ function peoplePicker(names, onPick) {
   return row;
 }
 
-// ----- 암상인: 진열장 카드 -----
-function drawShop(eco) {
-  shopList.innerHTML = "";
-  const app = document.querySelector(".app-shop");
-  app.classList.toggle("open", eco.shop.open);
-  shopState.textContent = eco.shop.open ? "영업 중" : "도착 전";
+// =====================================================
+//  경매장
+//  서버가 보내는 상태(auction)를 그대로 그림. 남은 시간만 화면에서 줄여 감
+// =====================================================
+const aucEl = {
+  img: document.querySelector("#auctioneer"),
+  bubble: document.querySelector("#auc-bubble"),
+  say: document.querySelector("#auc-say"),
+  call: document.querySelector("#auc-call"),
+  track: document.querySelector("#auc-track"),
+  lot: document.querySelector("#auc-lot"),
+  min: document.querySelector("#bid-min"),
+  plus: document.querySelector("#bid-plus"),
+  input: document.querySelector("#bid-input"),
+  custom: document.querySelector("#bid-custom-btn"),
+  note: document.querySelector("#auc-note"),
+  inv: document.querySelector("#inventory"),
+};
+let auc = null; // 가장 최근 경매 상태
+let aucAt = 0; // 그 상태를 받은 시각 (남은 시간 계산용)
+let aucMood = "default";
+let moodTimer = null;
+let aucTick = null;
+let canBid = false; // 살아있고 밤일 때만
 
-  for (const item of eco.shop.items) {
-    const card = make("div", "item-card" + (item.sold ? " sold" : ""));
-    const top = make("div", "item-top");
-    top.appendChild(icon(item.id, "item-ico"));
-    const timing = ITEM_TIMING[item.id];
-    const t = make("span", "timing " + timing);
-    t.title = TIMING_LABEL[timing];
-    t.appendChild(icon(timing));
-    top.appendChild(t);
-    card.appendChild(top);
-    card.appendChild(make("strong", "item-name", item.name));
-    card.appendChild(make("small", "item-desc", item.desc));
+function setMood(mood, ms) {
+  clearTimeout(moodTimer);
+  if (aucMood !== mood) {
+    aucMood = mood;
+    aucEl.img.src = "img/auctioneer/auctioneer_" + mood + ".png";
+    aucEl.img.classList.remove("pop");
+    aucEl.img.getBoundingClientRect();
+    aucEl.img.classList.add("pop");
+  }
+  if (ms) moodTimer = setTimeout(() => { moodTimer = null; setMood("default"); }, ms);
+}
 
-    const foot = make("div", "item-foot");
-    const price = make("span", "price");
-    price.appendChild(icon("credit"));
-    price.appendChild(document.createTextNode(item.price));
-    foot.appendChild(price);
-    const btn = make("button", "buy", item.sold ? "매진" : "구매");
-    btn.type = "button";
-    btn.dataset.item = item.id;
-    btn.disabled = item.sold || !eco.shop.open || eco.credits < item.price;
-    foot.appendChild(btn);
-    card.appendChild(foot);
+// 경매사 말: 물건 소개는 말풍선 본문, 입찰 호가는 아래 한 줄 (소개가 지워지지 않게)
+function say(text) {
+  aucEl.say.textContent = text;
+  aucEl.call.textContent = "";
+  aucEl.bubble.classList.remove("pop");
+  aucEl.bubble.getBoundingClientRect();
+  aucEl.bubble.classList.add("pop");
+}
 
-    if (item.sold) card.appendChild(make("span", "stamp", "SOLD OUT"));
+function liveLot() {
+  return auc && auc.index >= 0 && auc.lots[auc.index] && auc.lots[auc.index].status === "live" ? auc.lots[auc.index] : null;
+}
 
-    // 대상이 필요한 아이템: 구매를 누르면 카드 안에 얼굴 목록이 펼쳐짐
-    if (picker && picker.kind === "shop" && picker.id === item.id && !item.sold) {
-      card.classList.add("picking");
-      if (item.target === "deepfake" && !picker.deepKind) {
-        card.appendChild(make("small", "pick-label", "가짜 발표 문구"));
-        const kinds = make("div", "pick-row");
+function lotLeft(lot) {
+  return Math.max(0, lot.left - (Date.now() - aucAt));
+}
+
+function minBid(lot) {
+  return lot.leader ? lot.price + lot.step : lot.start;
+}
+
+function drawAuction() {
+  if (!auc) return;
+  // 진행 표시: 5칸
+  aucEl.track.innerHTML = "";
+  auc.lots.forEach((lot, i) => {
+    const cell = make("div", "auc-slot " + lot.status + (lot.mine && lot.status === "sold" ? " won" : ""));
+    cell.title = lot.name;
+    cell.appendChild(icon(lot.id));
+    cell.appendChild(make("small", null, lot.status === "sold" ? lot.price + "만" : lot.status === "unsold" ? "유찰" : lot.status === "live" ? "진행 중" : i + 1 + "번"));
+    aucEl.track.appendChild(cell);
+  });
+
+  // 지금 경매 중인 물건 (없으면 다음 물건 / 끝)
+  const lot = liveLot();
+  aucEl.lot.innerHTML = "";
+  aucEl.lot.className = "auc-lot" + (lot ? " live " + lot.cat : "");
+  if (lot) {
+    const head = make("div", "lot-head");
+    head.appendChild(icon(lot.id, "lot-ico"));
+    const title = make("div", "lot-title");
+    title.appendChild(make("span", "lot-cat " + lot.cat, CAT_LABEL[lot.cat] + " · " + WHEN_LABEL[lot.when]));
+    title.appendChild(make("strong", null, lot.name));
+    head.appendChild(title);
+    aucEl.lot.appendChild(head);
+    aucEl.lot.appendChild(make("p", "lot-desc", lot.desc));
+    const price = make("div", "lot-price");
+    const num = make("span", "lot-num");
+    num.appendChild(icon("credit"));
+    num.appendChild(document.createTextNode(" " + lot.price + "만"));
+    price.appendChild(num);
+    price.appendChild(make("span", "lot-leader" + (lot.mine ? " mine" : ""), lot.mine ? "내가 최고가!" : lot.leader ? lot.leader + " 최고가" : "시작가 · 아직 입찰 없음"));
+    aucEl.lot.appendChild(price);
+    const bar = make("div", "lot-timer");
+    bar.appendChild(make("i", null));
+    bar.appendChild(make("span", "lot-sec"));
+    aucEl.lot.appendChild(bar);
+  } else {
+    const done = auc.index >= auc.lots.length;
+    aucEl.lot.appendChild(make("p", "lot-wait", done ? "오늘 밤 경매가 모두 끝났습니다." : auc.index < 0 ? "곧 첫 번째 물건이 올라옵니다." : "다음 물건 준비 중..."));
+  }
+
+  // 입찰 버튼
+  const full = auc.myWins >= auc.winLimit;
+  const enable = (btn, amount, label) => {
+    btn.textContent = label;
+    btn.dataset.amount = amount;
+    btn.disabled = !canBid || !lot || lot.mine || full || amount > myCredits;
+  };
+  if (lot) {
+    const m = minBid(lot);
+    enable(aucEl.min, m, (lot.leader ? "입찰 " : "시작가 입찰 ") + m + "만");
+    enable(aucEl.plus, m + lot.step * 2, "크게 올리기 " + (m + lot.step * 2) + "만");
+    aucEl.input.min = m;
+    aucEl.input.placeholder = m + "만 이상";
+  } else {
+    enable(aucEl.min, 0, "입찰");
+    enable(aucEl.plus, 0, "크게 입찰");
+    aucEl.input.placeholder = "직접 입력";
+  }
+  aucEl.custom.disabled = aucEl.min.disabled;
+  aucEl.input.disabled = aucEl.min.disabled;
+
+  aucEl.note.textContent = !canBid
+    ? "관전 중에는 입찰할 수 없어요."
+    : "오늘 밤 낙찰 " + auc.myWins + " / " + auc.winLimit + "건" + (full ? " · 한도를 채웠어요" : "") + " · 보유 " + myCredits + "만 · 누가 샀는지는 공개되지 않아요";
+  tickAuction();
+}
+
+// 남은 시간 막대 + 마감 직전이면 경매사가 긴장한 표정
+function tickAuction() {
+  const lot = liveLot();
+  const bar = aucEl.lot.querySelector(".lot-timer i");
+  if (!lot || !bar) return;
+  const left = lotLeft(lot);
+  bar.style.width = (left / (auc.lotSeconds * 1000)) * 100 + "%";
+  aucEl.lot.querySelector(".lot-sec").textContent = Math.ceil(left / 1000) + "초";
+  aucEl.lot.classList.toggle("ending", left <= 5000);
+  if (!moodTimer) setMood(left <= 5000 && lot.leader ? "tense" : "default");
+}
+clearInterval(aucTick);
+aucTick = setInterval(tickAuction, 200);
+
+socket.on("auction", (a) => {
+  const prev = auc;
+  auc = a;
+  aucAt = Date.now();
+  const lot = a.lots[a.index];
+  // 경매사 대사 + 소리
+  if (a.event === "lot" && lot) {
+    say((a.index + 1) + "번째 물건, '" + lot.name + "'! " + lot.pitch + " " + lot.desc + ". 시작가 " + lot.start + "만!");
+    setMood("default");
+    sound.play("flip");
+    if (!isVisible("auction")) setDot("auction", true);
+  } else if (a.event === "bid" && lot) {
+    aucEl.call.textContent = "🔨 " + lot.price + "만! " + (lot.mine ? "당신이 최고가입니다." : lot.leader + " 님이 올렸습니다. 더 없습니까?");
+    sound.play(lot.mine ? "coin" : "bid");
+  } else if (a.event === "sold" && lot) {
+    say("낙찰! '" + lot.name + "', " + lot.price + "만에 " + (lot.mine ? "당신께" : lot.leader + " 님께") + " 돌아갑니다!");
+    setMood("sold", 2500);
+    sound.play("gavel");
+    toast("경매 낙찰 · " + lot.name + " (" + lot.price + "만)");
+  } else if (a.event === "unsold" && lot) {
+    say("'" + lot.name + "'은(는) 유찰입니다. 다음 물건으로 넘어가죠.");
+  } else if (a.event === "done") {
+    say("오늘 밤 경매는 여기까지입니다. 좋은 밤 되십시오.");
+  } else if (!prev || a.index < 0) {
+    say("곧 오늘 밤의 경매를 시작합니다. 낙찰은 한 분당 " + a.winLimit + "건까지!");
+    setMood("default");
+  }
+  drawAuction();
+});
+
+function sendBid(amount) {
+  const lot = liveLot();
+  if (!lot || !amount) return;
+  socket.emit("bid", { index: auc.index, amount: Number(amount) });
+}
+aucEl.min.addEventListener("click", () => sendBid(aucEl.min.dataset.amount));
+aucEl.plus.addEventListener("click", () => sendBid(aucEl.plus.dataset.amount));
+aucEl.custom.addEventListener("click", () => {
+  sendBid(Math.floor(Number(aucEl.input.value)));
+  aucEl.input.value = "";
+});
+aucEl.input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") aucEl.custom.click();
+});
+
+// ----- 내 낙찰품: 대상이 필요한 물건 사용 -----
+let inventory = [];
+let invPick = null; // { uid, target, to, kind } 고르는 중인 값
+
+socket.on("inventory", (list) => {
+  inventory = list;
+  if (invPick && !list.some((it) => it.uid === invPick.uid)) invPick = null;
+  drawInventory();
+});
+
+function drawInventory() {
+  aucEl.inv.innerHTML = "";
+  if (!inventory.length) {
+    aucEl.inv.appendChild(make("p", "inv-empty", "아직 없음 · 대상이 필요 없는 물건은 낙찰 즉시 적용돼요"));
+    return;
+  }
+  const eco = lastEco || { players: [], everyone: [], deepfakeTemplates: {} };
+  for (const it of inventory) {
+    const card = make("div", "inv-card");
+    const head = make("div", "inv-head");
+    head.appendChild(icon(it.id, "inv-ico"));
+    head.appendChild(make("strong", null, it.name));
+    card.appendChild(head);
+    card.appendChild(make("small", "inv-desc", it.desc));
+    const pick = invPick && invPick.uid === it.uid ? invPick : null;
+    const step = (label) => card.appendChild(make("small", "pick-label", label));
+
+    if (it.target === "player") {
+      step("대상 선택");
+      card.appendChild(peoplePicker(eco.players, (name) => socket.emit("useItem", { uid: it.uid, target: name })));
+    } else if (it.target === "deepfake") {
+      if (!pick || !pick.kind) {
+        step("가짜 발표 문구");
+        const row = make("div", "pick-row");
         for (const k in eco.deepfakeTemplates) {
           const b = make("button", "pick", eco.deepfakeTemplates[k]);
           b.type = "button";
-          b.addEventListener("click", () => { picker.deepKind = k; drawShop(lastEco); });
-          kinds.appendChild(b);
+          b.addEventListener("click", () => { invPick = { uid: it.uid, kind: k }; drawInventory(); });
+          row.appendChild(b);
         }
-        card.appendChild(kinds);
+        card.appendChild(row);
       } else {
-        card.appendChild(make("small", "pick-label", "대상 선택"));
-        const names = item.target === "deepfake" ? eco.everyone : eco.players;
-        card.appendChild(peoplePicker(names, (name) => {
-          socket.emit("buy", { item: item.id, target: name, kind: picker.deepKind || null });
-          picker = null;
-          drawShop(lastEco);
-        }));
+        step("누구 이름으로?");
+        card.appendChild(peoplePicker(eco.everyone, (name) => socket.emit("useItem", { uid: it.uid, kind: pick.kind, target: name })));
       }
+    } else if (it.target === "forge") {
+      if (!pick || !pick.target) {
+        step("① 누구인 척 보낼까?");
+        card.appendChild(peoplePicker(eco.players, (name) => { invPick = { uid: it.uid, target: name }; drawInventory(); }));
+      } else if (!pick.to) {
+        step("② " + pick.target + " 이름으로 누구에게?");
+        card.appendChild(peoplePicker(eco.everyone.filter((n) => n !== pick.target), (name) => { invPick = { ...pick, to: name }; drawInventory(); }));
+      } else {
+        step("③ " + pick.target + " → " + pick.to + " · 보낼 문장");
+        card.appendChild(textSender(it.uid, (text) => socket.emit("useItem", { uid: it.uid, target: pick.target, to: pick.to, text })));
+      }
+    } else if (it.target === "text") {
+      step("내일 아침 방송할 문장 (익명)");
+      card.appendChild(textSender(it.uid, (text) => socket.emit("useItem", { uid: it.uid, text })));
     }
-    shopList.appendChild(card);
+    aucEl.inv.appendChild(card);
   }
+}
+
+// 문장 입력칸 + 보내기 버튼
+function textSender(uid, onSend) {
+  const form = make("form", "inv-text");
+  const input = make("input");
+  input.maxLength = 80;
+  input.placeholder = "80자까지";
+  const btn = make("button", "primary", "보내기");
+  btn.type = "submit";
+  form.append(input, btn);
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (text) onSend(text);
+  });
+  return form;
 }
 
 // ----- 다크넷: 터미널 -----
@@ -540,12 +728,14 @@ function bootTerminal() {
 
 function drawDarknet(eco) {
   darknetList.innerHTML = "";
+  document.querySelector("#svc-left").textContent = "오늘 밤 남은 의뢰 " + eco.svcLeft + " / " + eco.svcLimit + "건 · 한 번 쓴 서비스는 다음부터 1.5배";
   for (const s of eco.services) {
-    const card = make("div", "svc" + (s.waitDays > 0 ? " locked" : ""));
+    const card = make("div", "svc" + (s.lock ? " locked" : ""));
     card.appendChild(icon(s.id, "svc-ico"));
     const body = make("div", "svc-body");
     body.appendChild(make("strong", null, s.name.replace("인포브로커 · ", "")));
     body.appendChild(make("small", null, s.desc));
+    if (s.uses) body.appendChild(make("small", "svc-uses", s.uses + "회 이용 · 가격 상승 중"));
     card.appendChild(body);
 
     const side = make("div", "svc-side");
@@ -556,13 +746,13 @@ function drawDarknet(eco) {
     const btn = make("button", "run");
     btn.type = "button";
     btn.dataset.service = s.id;
-    if (s.waitDays > 0) {
+    if (s.lock) {
       btn.appendChild(icon("lock"));
-      btn.appendChild(document.createTextNode(s.waitDays + "일"));
+      btn.appendChild(document.createTextNode(s.lock));
     } else {
       btn.textContent = "실행";
     }
-    btn.disabled = s.waitDays > 0 || eco.credits < s.price;
+    btn.disabled = !!s.lock || eco.svcLeft <= 0 || eco.available < s.price;
     side.appendChild(btn);
     card.appendChild(side);
 
@@ -605,7 +795,8 @@ function drawBank(eco) {
 function drawBankAmount() {
   const n = Number(bank.amount || 0);
   document.querySelector("#bank-amount").textContent = n;
-  transferBtn.disabled = !bank.to || n < 1 || n > myCredits;
+  const avail = lastEco ? lastEco.available : myCredits; // 입찰 중인 금액은 보낼 수 없음
+  transferBtn.disabled = !bank.to || n < 1 || n > avail;
   transferBtn.textContent = bank.to && n > 0 ? bank.to + "에게 " + n + "만 보내기" : "보내기";
 }
 
@@ -629,14 +820,10 @@ function drawBet() {
 function drawEconomy(eco) {
   lastEco = eco;
   myCredits = eco.credits;
-  drawShop(eco);
   drawDarknet(eco);
   drawBank(eco);
-
-  if (ghostDay !== currentDay) {
-    ghostDay = currentDay;
-    document.querySelector("#ghost-line").textContent = "“" + GHOST_LINES[Math.floor(Math.random() * GHOST_LINES.length)] + "”";
-  }
+  drawAuction(); // 입찰 버튼은 보유 크레딧에 따라 켜지고 꺼짐
+  drawInventory();
 
   gambleList.innerHTML = "";
   for (const g of eco.gambles) {
@@ -791,16 +978,6 @@ actionBtn.addEventListener("click", () => {
     target2: actionTarget2.value,
     mode: mode ? mode.value : null,
   });
-});
-
-// 상점 구매: 대상이 필요 없으면 바로 구매, 필요하면 카드 안에 얼굴 목록을 펼침
-shopList.addEventListener("click", (e) => {
-  const btn = e.target.closest("button.buy");
-  if (!btn || btn.disabled) return;
-  const item = lastEco.shop.items.find((i) => i.id === btn.dataset.item);
-  if (item.target === "none") return socket.emit("buy", { item: item.id });
-  picker = picker && picker.id === item.id ? null : { kind: "shop", id: item.id }; // 다시 누르면 닫힘
-  drawShop(lastEco);
 });
 
 darknetList.addEventListener("click", (e) => {
@@ -1027,22 +1204,19 @@ socket.on("gambleResult", async (res) => {
   pendingStatus = null;
 });
 
-let shopWasOpen = false;
-socket.on("economy", (eco) => {
-  drawEconomy(eco);
-  // 암상인이 막 도착했으면 탭에 빨간 점 + 짧은 방송
-  if (eco.shop.open && !shopWasOpen) {
-    if (!isVisible("shop")) setDot("shop", true);
-    toast("화물칸 해치가 열렸습니다. 암상인이 도착했습니다.");
-  }
-  shopWasOpen = eco.shop.open;
-});
+socket.on("economy", (eco) => drawEconomy(eco));
 socket.on("econMsg", (text) => {
   addLine("◆ " + text, "system econ");
-  if (text.includes("구매 완료")) ghostFace("smile");
-  else if (text.includes("먼저 가져갔다")) {
-    ghostFace("wary");
+  if (text.includes("의뢰 완료")) ghostFace("smile");
+  else if (text.includes("다크넷은 하룻밤") || text.includes("크레딧이 부족")) ghostFace("wary");
+  if (text.includes("더 높은 입찰")) {
     sound.play("sold");
+    if (!isVisible("auction")) setDot("auction", true);
+  }
+  if (text.includes("통신이 차단") || text.includes("방화벽")) toast(text);
+  if (text.includes("통신이 차단됐다")) {
+    dm.blocked = true;
+    drawDM();
   }
 });
 
@@ -1092,7 +1266,7 @@ function phaseCard(data) {
   lastCardKey = key;
 
   if (data.phase === "night") {
-    showPhaseCard(data.day + "일차 밤", data.alive ? "통행금지 · 능력 · 메신저 · 암상인" : "관전 중", "night");
+    showPhaseCard(data.day + "일차 밤", data.alive ? "통행금지 · 능력 · 메신저 · 경매" : "관전 중", "night");
   } else if (data.phase === "morning") {
     showPhaseCard(data.day + "일차 아침", "선내 방송", "morning");
   } else if (data.phase === "day") {
@@ -1140,6 +1314,8 @@ socket.on("phase", (data) => {
   if (data.canChat) chatInput.focus();
 
   setupDM(data);
+  canBid = data.phase === "night" && data.alive;
+  drawAuction();
 
   // ----- 연출 -----
   if (data.phase === "intro") showIntro(data.shipName);
@@ -1559,12 +1735,20 @@ function resetDM() {
   drawDM();
 }
 
+// 대화방 키: 관전 = "A ↔ B" / 도청 사본 = "🎧 대상" / 위조 사본(내가 보낸 것) = 받는 사람 / 평소 = 상대 이름
 function dmKey(msg) {
   if (dm.spectate) return [msg.from, msg.to].sort().join(" ↔ ");
+  if (msg.tap) return "🎧 " + msg.tap;
+  if (msg.forged) return msg.to;
   return msg.from === myName ? msg.to : msg.from;
 }
 
+function tapRoom0() {
+  return !!(dm.open && dm.open.startsWith("🎧"));
+}
+
 function setupDM(data) {
+  if (data.phase === "night" && !dm.night) dm.blocked = false; // 새 밤: 차단 풀림
   dm.night = data.phase === "night";
   dm.spectate = !!(data.dm && data.dm.spectate);
   dm.people = data.dm && data.dm.contacts ? data.dm.contacts : [];
@@ -1583,7 +1767,7 @@ function drawDM() {
     b.type = "button";
     b.dataset.key = key;
     const box = make("span");
-    if (dm.spectate) box.appendChild(make("span", "name", key));
+    if (dm.spectate || key.startsWith("🎧")) box.appendChild(make("span", "name", key));
     else box.appendChild(nameTag(key, true));
     const last = (dm.threads[key] || []).at(-1);
     if (last) box.appendChild(make("span", "preview", last.text));
@@ -1595,21 +1779,24 @@ function drawDM() {
 
   // 대화창
   dm.log.innerHTML = "";
-  const canTalk = dm.night && !dm.spectate && dm.open && dm.people.includes(dm.open);
-  dm.with.textContent = dm.open ? (dm.spectate ? "관전 · " + dm.open : dm.open + " 님과의 대화") : dm.spectate ? "대화방을 고르면 내용을 볼 수 있어요" : "왼쪽에서 대화할 사람을 고르세요";
+  const canTalk = dm.night && !dm.spectate && dm.open && dm.people.includes(dm.open) && !dm.blocked;
+  dm.with.textContent = dm.open ? (dm.spectate ? "관전 · " + dm.open : tapRoom0() ? "도청 중 · " + dm.open.slice(3) + "의 1:1 대화" : dm.open + " 님과의 대화") : dm.spectate ? "대화방을 고르면 내용을 볼 수 있어요" : "왼쪽에서 대화할 사람을 고르세요";
   const list = dm.open ? dm.threads[dm.open] || [] : [];
   if (dm.open && !list.length) dm.log.appendChild(make("li", "empty", "아직 메시지가 없어요"));
+  const tapRoom = dm.open && dm.open.startsWith("🎧");
   for (const m of list) {
-    const mine = !dm.spectate && m.from === myName;
-    const li = make("li", mine ? "me" : "");
-    if (dm.spectate) li.appendChild(make("small", null, m.from));
+    const mine = !dm.spectate && !tapRoom && (m.from === myName || m.forged);
+    const li = make("li", (mine ? "me" : "") + (m.forged ? " forged" : ""));
+    if (tapRoom) li.appendChild(make("small", null, m.from + " → " + m.to));
+    else if (dm.spectate) li.appendChild(make("small", null, m.from + (m.forged ? " (위조된 메시지)" : "")));
+    else if (m.forged) li.appendChild(make("small", null, "위조 · " + m.from + " 이름으로 보냄"));
     li.appendChild(document.createTextNode(m.text));
     dm.log.appendChild(li);
   }
   dm.log.scrollTop = dm.log.scrollHeight;
   dm.input.disabled = !canTalk;
   dm.send.disabled = !canTalk;
-  dm.input.placeholder = dm.spectate ? "관전 중에는 말할 수 없어요" : !dm.night ? "메신저는 밤에만 열려요" : dm.open ? "1:1 메시지" : "상대를 먼저 고르세요";
+  dm.input.placeholder = dm.spectate ? "관전 중에는 말할 수 없어요" : !dm.night ? "메신저는 밤에만 열려요" : dm.blocked ? "통신 차단됨 · 오늘 밤엔 보낼 수 없어요" : tapRoom0() ? "도청 중인 대화엔 끼어들 수 없어요" : dm.open ? "1:1 메시지" : "상대를 먼저 고르세요";
   dm.state.textContent = dm.spectate ? "GHOST MODE" : dm.night ? "통행금지 · 1:1만 가능" : "오프라인";
   const total = Object.values(dm.unread).reduce((a, b) => a + b, 0);
   setDot("dm", total > 0 && !isVisible("dm"));
@@ -1635,11 +1822,27 @@ dm.form.addEventListener("submit", (e) => {
 
 socket.on("dm", (msg) => {
   const key = dmKey(msg);
-  (dm.threads[key] = dm.threads[key] || []).push({ from: msg.from, to: msg.to, text: msg.text });
-  const mine = msg.fromId === socket.id;
+  (dm.threads[key] = dm.threads[key] || []).push({ from: msg.from, to: msg.to, text: msg.text, forged: !!msg.forged && (dm.spectate || !msg.tap) });
+  const mine = msg.fromId === socket.id || (msg.forged && !dm.spectate);
   if (!(dm.open === key && isVisible("dm"))) dm.unread[key] = (dm.unread[key] || 0) + (mine ? 0 : 1);
   drawDM();
   sound.play(mine ? "msgOut" : "msgIn");
+});
+
+// 통신 차단당함
+socket.on("dmBlocked", () => {
+  dm.blocked = true;
+  toast("통신이 차단돼 메시지를 보낼 수 없습니다.");
+  sound.play("error");
+  drawDM();
+});
+// 채팅 도청: 이미 오간 대화를 한꺼번에 받음
+socket.on("tapLog", ({ target, msgs }) => {
+  const key = "🎧 " + target;
+  dm.threads[key] = [...msgs.map((m) => ({ from: m.from, to: m.to, text: m.text })), ...(dm.threads[key] || [])];
+  dm.unread[key] = (dm.unread[key] || 0) + msgs.length;
+  drawDM();
+  toast("도청 시작 · " + target + "의 1:1 대화가 메신저에 들어옵니다.");
 });
 
 fillIcons(); // HTML에 적어둔 아이콘 자리 채우기

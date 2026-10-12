@@ -2194,3 +2194,120 @@ body:has(.game[data-phase="night"]) {
 .game[data-phase="night"] .pane-chat {
   background: linear-gradient(180deg, #08081299 0%, #080812e6 55%, #080812 100%), url("img/bg/cabin.jpg") center 40% / cover no-repeat;
 }
+
+/* =====================================================
+   경매장 (밤)
+   위: 경매사 + 말풍선 / 가운데: 5칸 진행표 + 지금 물건 / 아래: 입찰 버튼 + 내 낙찰품
+   ===================================================== */
+.app-auction {
+  gap: 10px;
+  background:
+    linear-gradient(180deg, #0a0610cc 0%, #0a0610ee 45%, #0a0610 100%),
+    url("img/bg/auction.jpg") center top / cover no-repeat;
+}
+.app-auction.enter-first { animation: app-quick 0.3s ease-out; }
+.auc-stage { position: relative; display: grid; grid-template-columns: 112px 1fr; align-items: end; gap: 8px; min-height: 120px; }
+.auctioneer { width: 112px; height: 112px; object-fit: contain; filter: drop-shadow(0 4px 10px #000a); image-rendering: auto; }
+.auctioneer.pop { animation: bump 0.45s; }
+.auc-bubble {
+  position: relative;
+  align-self: center;
+  padding: 9px 11px;
+  border-radius: 12px;
+  background: #fff8e8;
+  color: #1a1206;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  box-shadow: 0 3px 0 #0006;
+}
+.auc-bubble::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  bottom: 18px;
+  border: 7px solid transparent;
+  border-right-color: #fff8e8;
+  border-left: 0;
+}
+.auc-bubble.pop { animation: bubble-pop 0.25s ease-out; }
+@keyframes bubble-pop { from { transform: scale(0.94); opacity: 0.4; } to { transform: none; opacity: 1; } }
+
+.auc-track { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.auc-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 2px;
+  border: 1px solid #ffd27a33;
+  border-radius: 6px;
+  background: #140c06aa;
+  color: #8a7a62;
+  font-size: 10px;
+}
+.auc-slot svg { width: 18px; height: 18px; }
+.auc-slot.live { color: #ffe3a3; border-color: #ffd27a; box-shadow: 0 0 10px #ffd27a55; }
+.auc-slot.sold { color: #ffd27a; }
+.auc-slot.won { background: #3dffa222; border-color: #3dffa2; color: #9dffd0; }
+.auc-slot.unsold { opacity: 0.5; }
+
+.auc-lot {
+  padding: 12px;
+  border: 1px solid #ffd27a44;
+  border-radius: 10px;
+  background: #120a05e6;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.auc-lot.live { border-color: #ffd27a; box-shadow: 0 0 16px #ffd27a33; }
+.auc-lot.ending { border-color: #ff4d6d; box-shadow: 0 0 18px #ff4d6d55; }
+.lot-head { display: flex; align-items: center; gap: 10px; }
+.lot-ico { width: 38px; height: 38px; padding: 7px; border-radius: 10px; background: #ffd27a22; color: #ffd27a; flex-shrink: 0; }
+.auc-lot.hack .lot-ico { background: #2ff4ff22; color: var(--cyan); }
+.auc-lot.defense .lot-ico { background: #3dffa222; color: #3dffa2; }
+.lot-title { display: flex; flex-direction: column; gap: 3px; }
+.lot-title strong { font-size: 17px; color: #fff3d6; }
+.lot-cat { font-size: 11px; color: #ffd27a; }
+.lot-cat.hack { color: var(--cyan); }
+.lot-cat.defense { color: #3dffa2; }
+.lot-desc { margin: 0; font-size: 13px; line-height: 1.45; color: #e8dcc4; }
+.lot-price { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.lot-num { display: inline-flex; align-items: center; gap: 2px; font-size: 22px; font-weight: 800; color: var(--money, #f5c451); }
+.lot-num svg { width: 20px; height: 20px; }
+.lot-leader { font-size: 12px; color: #c9b39a; }
+.lot-leader.mine { color: #3dffa2; font-weight: 700; }
+.lot-timer { position: relative; height: 16px; border-radius: 8px; background: #ffffff12; overflow: hidden; }
+.lot-timer i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, #ffb84d, #ffd27a); transition: width 0.2s linear; }
+.auc-lot.ending .lot-timer i { background: #ff4d6d; }
+.lot-sec { position: absolute; right: 8px; top: 0; font-size: 11px; line-height: 16px; color: #fff; font-weight: 700; }
+.lot-wait { margin: 6px 0; text-align: center; color: #c9b39a; font-size: 13px; }
+
+.auc-bid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.bid-btn { padding: 10px 8px; font-size: 14px; }
+.bid-custom { grid-column: 1 / -1; display: flex; gap: 6px; }
+.bid-custom input { flex: 1; min-width: 0; padding: 9px 10px; font-size: 14px; }
+.auc-note { margin: 0; font-size: 11.5px; color: #c9b39a; }
+
+.inventory { display: flex; flex-direction: column; gap: 8px; }
+.inv-empty { margin: 0; font-size: 12px; color: var(--dim); }
+.inv-card { padding: 10px; border: 1px solid #3dffa266; border-radius: 10px; background: #08140fcc; display: flex; flex-direction: column; gap: 6px; }
+.inv-head { display: flex; align-items: center; gap: 8px; color: #9dffd0; }
+.inv-ico { width: 22px; height: 22px; }
+.inv-desc { color: #b9d8c9; font-size: 12px; line-height: 1.4; }
+.inv-text { display: flex; gap: 6px; }
+.inv-text input { flex: 1; min-width: 0; padding: 8px 10px; font-size: 14px; }
+.inv-text button { padding: 8px 12px; font-size: 14px; }
+
+/* 다크넷: 중개인 고스트 */
+.ghost-row { display: grid; grid-template-columns: 46px 1fr; align-items: center; gap: 10px; }
+.ghost-row strong { color: #ffcf8a; font-size: 14px; }
+.svc-uses { color: #ffb86b !important; }
+
+/* 메신저: 위조 메시지 표시 */
+.dm-log li.forged { outline: 1px dashed #ffb86b; }
+.dm-log li.me.forged { background: #5a3a12; color: #ffe3c2; }
+.auc-bubble span { display: block; }
+.auc-call { display: block; margin-top: 4px; font-size: 12px; color: #b3541e; }
+.auc-call:empty { display: none; }

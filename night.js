@@ -111,7 +111,7 @@ function investigate(game, t, rand = Math.random) {
 //  판정
 //  game.night.actions  = { 행동한 사람 id: { target, target2, mode } }  (target은 id)
 //  game.night.attackVotes = { 신디케이트 id: 대상 id }  (공격 투표. 팀 전체 하루 1회 공격)
-//  game.night.effects  = { id: Set(["proxy", "firewall", "armor", "decoy", "launder"]) }
+//  game.night.effects  = { id: Set(["proxy", "firewall", "armor", "decoy"]) }
 //  game.night.services = [{ type: track|census|contract|drone|scanner|translog, by, target }]
 //  game.night.transfers = [{ from, to, amount }]
 //  game.night.deepfake = { kind: injured|healed, target: id }
@@ -386,10 +386,9 @@ function resolveNight(game, rand = Math.random) {
     tell(s.actor, s.shown.name + "의 체력: " + shownHp + " / " + shownMax);
   }
 
-  // 송금 로그: 돈세탁한 사람의 송금은 빠짐
+  // 송금 로그: 오늘 밤 오간 모든 송금
   for (const s of servicesOf("translog")) {
     const rows = (night.transfers || [])
-      .filter((tr) => !hasFx(game, find(tr.from), "launder"))
       .map((tr) => find(tr.from).name + " → " + find(tr.to).name + " " + tr.amount + "만");
     tell(s.actor, "송금 로그: " + (rows.length ? rows.join(", ") : "기록 없음"));
   }

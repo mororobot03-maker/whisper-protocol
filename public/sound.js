@@ -119,6 +119,8 @@ const sound = (() => {
     // 돈
     coin: (t) => { tone(t, N.B5, 0.06, { vol: 0.15 }); tone(t + 0.06, N.E6, 0.22, { vol: 0.15 }); },
     spend: (t) => { tone(t, N.E5, 0.05, { vol: 0.12 }); tone(t + 0.05, N.B4, 0.1, { vol: 0.1 }); },
+    gavel: (t) => { noise(t, 0.05, { vol: 0.35, freq: 900, to: 300 }); tone(t, 150, 0.12, { type: "square", vol: 0.12 }); noise(t + 0.16, 0.05, { vol: 0.3, freq: 900, to: 300 }); tone(t + 0.16, 140, 0.18, { type: "square", vol: 0.1 }); tone(t + 0.22, N.E6, 0.35, { type: "triangle", vol: 0.12 }); },
+    bid: (t) => { tone(t, N.A5, 0.05, { vol: 0.12 }); tone(t + 0.05, N.C6, 0.12, { vol: 0.12 }); },
     sold: (t) => { tone(t, 330, 0.1, { type: "triangle", vol: 0.2 }); tone(t + 0.1, 220, 0.25, { type: "triangle", vol: 0.2 }); },
 
     // 단계 전환

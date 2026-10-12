@@ -108,7 +108,7 @@
         <button data-tab="dm"><i data-icon="talk"></i><span>메신저</span><i class="dot"></i></button>
         <button data-tab="info"><i data-icon="appInfo"></i><span>내 정보</span><i class="dot"></i></button>
         <button data-tab="action"><i data-icon="appAction"></i><span>능력</span><i class="dot"></i></button>
-        <button data-tab="shop"><i data-icon="appShop"></i><span>암상인</span><i class="dot"></i></button>
+        <button data-tab="auction"><i data-icon="gavel"></i><span>경매장</span><i class="dot"></i></button>
         <button data-tab="darknet"><i data-icon="appDarknet"></i><span>다크넷</span><i class="dot"></i></button>
         <button data-tab="bank"><i data-icon="appBank"></i><span>송금</span><i class="dot"></i></button>
         <button data-tab="casino"><i data-icon="appCasino"></i><span>카지노</span><i class="dot"></i></button>
@@ -180,29 +180,43 @@
           </div>
         </section>
 
-        <!-- 암상인 -->
-        <section class="pane app app-shop" data-pane="shop">
-          <!-- 화물칸: 도착 전엔 해치가 닫혀 있음 -->
-          <div class="shop-head">
-            <div class="ghost-face" aria-hidden="true">
-              <!-- 그림이 있으면 그림, 없으면 G 동그라미 -->
-              <img id="ghost-img" src="img/ghost/ghost_default.png" alt="">
-              <span>G</span>
+        <!-- 경매장: 밤마다 5건, 건당 20초. 경매사가 물건을 소개 -->
+        <section class="pane app app-auction" data-pane="auction">
+          <div class="auc-stage">
+            <img id="auctioneer" class="auctioneer" src="img/auctioneer/auctioneer_default.png" alt="경매사">
+            <div id="auc-bubble" class="auc-bubble">
+              <span id="auc-say">곧 오늘 밤의 경매를 시작합니다.</span>
+              <b id="auc-call" class="auc-call"></b>
             </div>
-            <div>
-              <strong>암상인 "고스트"</strong>
-              <p id="ghost-line" class="ghost-line"></p>
-            </div>
-            <span id="shop-state" class="badge"></span>
           </div>
-          <div id="cargo-hatch" class="cargo-hatch" aria-hidden="true"><span></span><span></span></div>
-          <div id="shop-list" class="shop-grid"></div>
-          <p class="legend"><i data-icon="tonight"></i>오늘 밤 <i data-icon="tomorrow"></i>내일 낮 <i data-icon="inbox"></i>아침에 결과</p>
+          <div id="auc-track" class="auc-track"></div>
+          <div id="auc-lot" class="auc-lot"></div>
+          <div id="auc-bid" class="auc-bid">
+            <button id="bid-min" class="bid-btn primary" type="button"></button>
+            <button id="bid-plus" class="bid-btn" type="button"></button>
+            <div class="bid-custom">
+              <input id="bid-input" type="number" inputmode="numeric" min="1" step="1" placeholder="직접 입력">
+              <button id="bid-custom-btn" class="bid-btn" type="button">입찰</button>
+            </div>
+          </div>
+          <p id="auc-note" class="auc-note"></p>
+          <h3 class="pane-title">내 낙찰품</h3>
+          <div id="inventory" class="inventory"><p class="inv-empty">아직 없음 · 대상이 필요 없는 물건은 낙찰 즉시 적용돼요</p></div>
         </section>
 
         <!-- 다크넷 + 송금 -->
         <section class="pane app app-darknet" data-pane="darknet">
           <div class="term-head"><span>darknet://leviathan</span><span class="term-dots"><i></i><i></i><i></i></span></div>
+          <div class="ghost-row">
+            <div class="ghost-face" aria-hidden="true">
+              <img id="ghost-img" src="img/ghost/ghost_default.png" alt="">
+              <span>G</span>
+            </div>
+            <div>
+              <strong>중개인 "고스트"</strong>
+              <p id="svc-left" class="ghost-line"></p>
+            </div>
+          </div>
           <pre id="term-log" class="term-log"></pre>
           <div id="darknet-list" class="svc-list"></div>
         </section>
