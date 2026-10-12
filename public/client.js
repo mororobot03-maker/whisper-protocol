@@ -54,8 +54,6 @@ const intelLog = document.querySelector("#intel-log");
 const tabs = document.querySelector("#tabs");
 const darknetList = document.querySelector("#darknet-list");
 const transferBtn = document.querySelector("#transfer-btn");
-const betAmount = document.querySelector("#bet-amount");
-const gambleList = document.querySelector("#gamble-list");
 const errorEl = document.querySelector("#error");
 
 let countdown = null; // 남은 시간 표시용 타이머
@@ -187,6 +185,7 @@ function setupTabs(data) {
   if (night) setTab("action", true);
   else if (data.phase === "night") setTab("dm", true); // 사망자: 메신저 관전
   else if (data.canVote) setTab("vote", true);
+  else if (day && wide.matches) setTab("casino", true); // PC: 왼쪽 그룹 채팅 + 오른쪽 카지노
   else setTab("chat", true);
 }
 
@@ -800,23 +799,6 @@ function drawBankAmount() {
   transferBtn.textContent = bank.to && n > 0 ? bank.to + "에게 " + n + "만 보내기" : "보내기";
 }
 
-// ----- 카지노: 칩 -----
-let bet = 10;
-
-// 올인이거나 가진 돈보다 큰 칩이면 가진 돈만큼만
-function betValue() {
-  return bet === "all" ? myCredits : Math.min(bet, myCredits);
-}
-
-function drawBet() {
-  document.querySelector("#bet-view").textContent = betValue();
-  betAmount.value = betValue();
-  for (const c of document.querySelectorAll(".chip")) {
-    c.classList.toggle("on", String(c.dataset.bet) === String(bet) && (bet === "all" || bet <= myCredits));
-    c.disabled = c.dataset.bet !== "all" && Number(c.dataset.bet) > myCredits;
-  }
-}
-
 function drawEconomy(eco) {
   lastEco = eco;
   myCredits = eco.credits;
@@ -824,18 +806,6 @@ function drawEconomy(eco) {
   drawBank(eco);
   drawAuction(); // 입찰 버튼은 보유 크레딧에 따라 켜지고 꺼짐
   drawInventory();
-
-  gambleList.innerHTML = "";
-  for (const g of eco.gambles) {
-    const btn = make("button", "game-btn " + g.id);
-    btn.type = "button";
-    btn.dataset.kind = g.id;
-    btn.appendChild(make("strong", null, g.id === "double" ? "룰렛" : "슬롯머신"));
-    btn.appendChild(make("small", null, "당첨 " + Math.round(g.chance * 100) + "% · " + g.payout + "배"));
-    gambleList.appendChild(btn);
-  }
-  drawBet();
-  if (eco.mine) drawMine(eco.mine);
 }
 
 // 투표 버튼
@@ -1012,21 +982,6 @@ transferBtn.addEventListener("click", () => {
   drawBankAmount();
 });
 
-// 카지노: 칩으로 베팅액 고르기
-document.querySelector("#chips").addEventListener("click", (e) => {
-  const c = e.target.closest(".chip");
-  if (!c || c.disabled) return;
-  bet = c.dataset.bet === "all" ? "all" : Number(c.dataset.bet);
-  drawBet();
-});
-
-gambleList.addEventListener("click", (e) => {
-  const btn = e.target.closest("button");
-  if (!btn || spinning) return; // 돌아가는 중에는 다시 못 누름
-  startSpin(btn.dataset.kind); // 서버 응답을 기다리는 동안 바로 돌기 시작
-  socket.emit("gamble", { kind: btn.dataset.kind, amount: betValue() });
-});
-
 meRole.addEventListener("click", () => setTab("info"));
 
 // 결과 화면 버튼
@@ -1131,8 +1086,13 @@ socket.on("yourRole", (role) => {
 });
 
 // 내 체력과 크레딧
-// 도박 애니메이션 중에는 결과가 미리 보이지 않도록 잠깐 보류했다가 반영
+// 카지노 연출 중에는 결과가 미리 보이지 않도록 잠깐 보류했다가 연출이 끝나면 반영 (casino.js가 casinoHold를 켜고 끔)
 let pendingStatus = null;
+let casinoHold = false;
+function flushStatus() {
+  if (pendingStatus) drawStatus(pendingStatus);
+  pendingStatus = null;
+}
 let lastHp = null;
 let shownCredits = null;
 let countTimer = null;
@@ -1183,7 +1143,7 @@ function drawStatus(s) {
     creditNum.textContent = s.credits;
   }
   shownCredits = s.credits;
-  if (lastEco) drawBet();
+  if (typeof drawBetBar === "function") drawBetBar(); // 카지노 판돈 최대치
 }
 
 function flashHurt() {
@@ -1193,15 +1153,8 @@ function flashHurt() {
   v.classList.add("show");
 }
 socket.on("status", (s) => {
-  if (spinning) pendingStatus = s;
+  if (casinoHold) pendingStatus = s;
   else drawStatus(s);
-});
-
-socket.on("gambleResult", async (res) => {
-  await stopSpin(res);
-  if (!res.error) addLine("◆ " + res.name + ": " + (res.win ? "당첨! +" : "꽝. ") + res.delta + "만", "system econ");
-  if (pendingStatus) drawStatus(pendingStatus);
-  pendingStatus = null;
 });
 
 socket.on("economy", (eco) => drawEconomy(eco));
@@ -1292,7 +1245,7 @@ socket.on("phase", (data) => {
   screens.game.dataset.phase = data.phase; // CSS에서 밤/낮 분위기 바꾸는 용도
   startTimer(data.seconds);
 
-  resetMineUI(); // 단계가 바뀌면 풀던 채굴 문제는 무효
+  if (typeof casinoPhase === "function") casinoPhase(data); // 낮이 끝나면 진행 중이던 카지노 화면 정리
   drawPrivate(data.private);
   drawAction(data.phase === "night" ? data.action : null);
   setupTabs(data);
@@ -1389,144 +1342,6 @@ socket.on("errorMsg", (msg) => {
   sound.play("error");
   errorEl.textContent = msg;
   document.querySelector("#result-note").textContent = msg; // 결과 화면에서 재시작이 안 될 때 이유 표시
-});
-
-// =====================================================
-//  채굴 미션 (카지노 아래)
-//  서버가 문제를 보내면 → 화면에 판을 그리고 → 고른 답을 서버로 → 서버가 채점
-// =====================================================
-const mine = {
-  btn: document.querySelector("#mine-btn"),
-  left: document.querySelector("#mine-left"),
-  desc: document.querySelector("#mine-desc"),
-  target: document.querySelector("#mine-target"),
-  board: document.querySelector("#mine-board"),
-  bar: document.querySelector("#mine-bar"),
-  info: { done: 0, total: 5, next: 2 },
-  active: null, // 지금 풀고 있는 문제
-  lockTimer: null,
-  timeTimer: null,
-};
-
-function drawMine(info) {
-  if (info) mine.info = info;
-  const { done, total, next } = mine.info;
-  mine.left.textContent = "미션 " + done + " / " + total;
-  if (mine.active) return;
-  const finished = done >= total;
-  mine.btn.disabled = finished || !!mine.lockTimer;
-  if (!mine.lockTimer) mine.btn.textContent = finished ? "이번 시간 채굴 완료" : "채굴 시작 · +" + next + "만";
-}
-
-function resetMineUI() {
-  clearTimeout(mine.timeTimer);
-  mine.active = null;
-  mine.board.innerHTML = "";
-  mine.board.className = "mine-board";
-  mine.target.classList.add("hidden");
-  mine.bar.style.transition = "none";
-  mine.bar.style.width = "0%";
-  mine.desc.textContent = "미션을 깨면 크레딧이 들어옵니다. 틀리면 5초 과열.";
-  drawMine();
-}
-
-mine.btn.addEventListener("click", () => {
-  if (mine.active || mine.btn.disabled) return;
-  sound.play("type");
-  socket.emit("mineStart");
-});
-
-socket.on("mineChallenge", (c) => {
-  mine.active = { ...c, picks: [] };
-  mine.btn.disabled = true;
-  mine.btn.textContent = "채굴 중... +" + c.reward + "만";
-  mine.board.innerHTML = "";
-  mine.board.className = "mine-board " + c.type;
-  mine.target.classList.remove("hidden");
-  if (c.type === "hash") {
-    mine.desc.textContent = "미션 " + c.mission + " · 아래 해시 중 이 글자로 시작하는 것을 찾아라";
-    mine.target.textContent = c.target + "▒▒▒";
-  } else {
-    mine.desc.textContent = "미션 " + c.mission + " · 블록을 1부터 순서대로 연결하라";
-    mine.target.textContent = "1 → " + c.cells.length;
-  }
-  c.cells.forEach((v, i) => {
-    const b = make("button", "mine-cell", String(v));
-    b.type = "button";
-    b.dataset.i = i;
-    mine.board.appendChild(b);
-  });
-  // 남은 시간 막대
-  mine.bar.style.transition = "none";
-  mine.bar.style.width = "100%";
-  mine.bar.getBoundingClientRect();
-  mine.bar.style.transition = "width " + c.seconds + "s linear";
-  mine.bar.style.width = "0%";
-  clearTimeout(mine.timeTimer);
-  mine.timeTimer = setTimeout(() => submitMine(-1), c.seconds * 1000); // 시간 초과
-});
-
-function submitMine(answer) {
-  if (!mine.active) return;
-  clearTimeout(mine.timeTimer);
-  mine.active = null;
-  mine.bar.style.transition = "none";
-  socket.emit("mineAnswer", { answer });
-}
-
-mine.board.addEventListener("click", (e) => {
-  const cell = e.target.closest(".mine-cell");
-  const c = mine.active;
-  if (!cell || !c || cell.disabled) return;
-  const i = Number(cell.dataset.i);
-  if (c.type === "hash") {
-    cell.classList.add("picked");
-    return submitMine(i);
-  }
-  // 블록 순서: 맞으면 불이 켜지고, 틀리면 바로 제출(실패)
-  const want = c.picks.length + 1;
-  c.picks.push(i);
-  if (c.cells[i] !== want) {
-    cell.classList.add("wrong");
-    return submitMine(c.picks);
-  }
-  cell.classList.add("linked");
-  cell.disabled = true;
-  sound.play("click");
-  if (c.picks.length === c.cells.length) submitMine(c.picks);
-});
-
-socket.on("mineResult", (r) => {
-  if (r.error) {
-    mine.desc.textContent = r.error;
-    sound.play("error");
-    return drawMine();
-  }
-  mine.target.classList.add("hidden");
-  if (r.ok) {
-    mine.desc.textContent = "블록 채굴 성공! +" + r.delta + "만";
-    mine.board.classList.add("success");
-    sound.play("win");
-  } else {
-    mine.desc.textContent = (r.timeout ? "시간 초과! " : "해시 불일치! ") + "장비 과열 " + r.lock + "초";
-    mine.board.classList.add("fail");
-    sound.play("lose");
-    // 과열 카운트다운
-    let left = r.lock;
-    mine.btn.disabled = true;
-    mine.btn.textContent = "과열 " + left + "초";
-    clearInterval(mine.lockTimer);
-    mine.lockTimer = setInterval(() => {
-      left--;
-      mine.btn.textContent = "과열 " + left + "초";
-      if (left <= 0) {
-        clearInterval(mine.lockTimer);
-        mine.lockTimer = null;
-        drawMine();
-      }
-    }, 1000);
-  }
-  drawMine();
 });
 
 // =====================================================

@@ -237,38 +237,32 @@
           <button id="transfer-btn" class="bank-send" type="button">보내기</button>
         </section>
 
-        <!-- 카지노 -->
+        <!-- 카지노 (낮): 판돈은 위에서 한 번 정하고, 아래에서 게임을 골라 플레이 (화면은 casino.js가 그림) -->
         <section class="pane app app-casino" data-pane="casino">
-          <div id="casino-stage" class="casino-stage">
-            <div class="wheel-wrap"><div id="wheel" class="wheel"></div><i class="pointer"></i></div>
-            <div id="reels" class="reels"><span>7</span><span>7</span><span>7</span></div>
-            <p id="casino-result" class="casino-result">베팅액을 넣고 게임을 고르세요.</p>
+          <div class="cas-head">
+            <strong>LEVIATHAN CASINO</strong>
+            <span id="cas-left" class="cas-left"></span>
           </div>
-          <div class="bet-row">
-            <small>베팅</small>
-            <span class="bet-now"><span id="bet-view">10</span>만</span>
-          </div>
-          <div id="chips" class="chips">
-            <button type="button" class="chip c10" data-bet="10">10</button>
-            <button type="button" class="chip c20" data-bet="20">20</button>
-            <button type="button" class="chip c50" data-bet="50">50</button>
-            <button type="button" class="chip call" data-bet="all">올인</button>
-          </div>
-          <input id="bet-amount" class="hidden" aria-hidden="true" value="10">
-          <div id="gamble-list" class="gamble-list"></div>
-
-          <!-- 채굴 미션: 서버가 낸 문제를 풀면 크레딧 -->
-          <div class="mine-box">
-            <div class="mine-head">
-              <strong>⛏ 수동 채굴</strong>
-              <span id="mine-left" class="mine-left"></span>
+          <div class="cas-bet">
+            <div class="bet-line">
+              <small>판돈</small>
+              <button id="bet-minus" class="bet-step" type="button" aria-label="1만 줄이기">−</button>
+              <input id="bet-range" type="range" min="1" max="50" step="1" value="10" aria-label="판돈">
+              <button id="bet-plus" class="bet-step" type="button" aria-label="1만 늘리기">+</button>
+              <span class="bet-now"><b id="bet-view">10</b>만</span>
             </div>
-            <p id="mine-desc" class="mine-desc">미션을 깨면 크레딧이 들어옵니다. 틀리면 5초 과열.</p>
-            <div id="mine-target" class="mine-target hidden"></div>
-            <div id="mine-board" class="mine-board"></div>
-            <div class="mine-timer"><i id="mine-bar"></i></div>
-            <button id="mine-btn" class="mine-btn" type="button">채굴 시작</button>
+            <div id="bet-quick" class="bet-quick">
+              <button type="button" data-q="5">5</button>
+              <button type="button" data-q="10">10</button>
+              <button type="button" data-q="25">25</button>
+              <button type="button" data-q="50">50</button>
+              <button type="button" data-q="max">최대</button>
+            </div>
+            <p class="bet-safe">져도 판돈은 그대로 돌려받아요 · 이기면 배당만큼 더</p>
           </div>
+          <div id="cas-games" class="cas-games"></div>
+          <div id="cas-table" class="cas-table"></div>
+          <p id="cas-result" class="cas-result"></p>
         </section>
 
         <!-- 메모장: 내 브라우저에만 저장 -->
@@ -359,5 +353,6 @@
   <script src="sound.js"></script>
   <script src="fx.js"></script>
   <script src="client.js"></script>
+  <script src="casino.js"></script>
 </body>
 </html>

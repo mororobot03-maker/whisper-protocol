@@ -1,5 +1,5 @@
 // =====================================================
-//  경제 시스템 정의: 경매 아이템, 다크넷 서비스, 도박
+//  경제 시스템 정의: 경매 아이템, 다크넷 서비스 (카지노는 casino.js)
 //  단위: 만 크레딧
 // =====================================================
 
@@ -68,16 +68,10 @@ function bidStep(item) {
   return Math.max(2, Math.round(item.price * 0.1));
 }
 
-// 도박 (3단계에서 6종으로 개편 예정)
-const GAMBLES = {
-  double:  { name: "룰렛 (더블업)", chance: 0.5, payout: 2 },
-  jackpot: { name: "슬롯머신 (잭팟)", chance: 0.1, payout: 8 },
-};
-
 const MINER_INCOME = 15;
 const MINER_TURNS = 3;
 
 module.exports = {
-  ITEMS, DEEPFAKE_TEMPLATES, SERVICES, SERVICE_NIGHT_LIMIT, servicePrice, AUCTION, bidStep, GAMBLES,
+  ITEMS, DEEPFAKE_TEMPLATES, SERVICES, SERVICE_NIGHT_LIMIT, servicePrice, AUCTION, bidStep,
   MINER_INCOME, MINER_TURNS,
 };

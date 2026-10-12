@@ -17,9 +17,6 @@ const fx = {
   intro: document.querySelector("#intro"),
   cardFront: document.querySelector("#card-front"),
   shipName: document.querySelector("#ship-name"),
-  wheel: document.querySelector("#wheel"),
-  reels: document.querySelector("#reels"),
-  casinoResult: document.querySelector("#casino-result"),
   result: document.querySelector("#result"),
   confetti: document.querySelector("#confetti"),
 };
@@ -528,82 +525,6 @@ function showIntro(shipName) {
 function hideIntro() {
   fx.intro.classList.add("hidden");
   fx.intro.classList.remove("play");
-}
-
-// =====================================================
-//  3. 카지노
-// =====================================================
-
-const SYMBOLS = ["7", "♠", "◆", "★", "☢", "♣"];
-let spinning = false;
-let spinStart = 0;
-let wheelAngle = 0;
-let reelTimer = null;
-
-function startSpin(kind) {
-  spinning = true;
-  spinStart = Date.now();
-  fx.casinoResult.className = "casino-result";
-  fx.casinoResult.textContent = kind === "double" ? "룰렛이 돈다..." : "릴이 돈다...";
-  fx.wheel.parentElement.classList.toggle("hidden", kind !== "double");
-  fx.reels.classList.toggle("hidden", kind !== "jackpot");
-
-  sound.spin(kind === "double" ? 2600 : 2000);
-  if (kind === "double") {
-    fx.wheel.style.transition = "none";
-    fx.wheel.classList.add("spinning");
-  } else {
-    const reels = fx.reels.querySelectorAll("span");
-    reelTimer = setInterval(() => {
-      reels.forEach((r) => {
-        if (!r.classList.contains("stopped")) r.textContent = SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
-      });
-    }, 70);
-    reels.forEach((r) => r.classList.remove("stopped"));
-  }
-}
-
-// 서버 결과를 받으면 최소 1.4초는 돌린 뒤 멈춤
-async function stopSpin(res) {
-  const wait = Math.max(0, 1400 - (Date.now() - spinStart));
-  await sleep(wait);
-
-  if (res.error) {
-    fx.wheel.classList.remove("spinning");
-    clearInterval(reelTimer);
-    fx.casinoResult.textContent = res.error;
-    sound.play("error");
-    spinning = false;
-    return;
-  }
-
-  if (res.kind === "double") {
-    // 룰렛판: 30도마다 빨강/검정. 위쪽 바늘에 빨강이 오면 당첨
-    fx.wheel.classList.remove("spinning");
-    const target = res.win ? 15 : 45; // 빨강 칸 가운데 / 검정 칸 가운데
-    const extra = 60 * Math.floor(Math.random() * 6);
-    wheelAngle = wheelAngle - (wheelAngle % 360) + 1080 + (360 - target - extra);
-    fx.wheel.style.transition = "";
-    fx.wheel.style.transform = "rotate(" + wheelAngle + "deg)";
-    await sleep(1300);
-  } else {
-    // 슬롯: 당첨이면 7 세 개, 아니면 서로 다른 그림
-    const reels = [...fx.reels.querySelectorAll("span")];
-    let final = res.win ? ["7", "7", "7"] : [0, 1, 2].map(() => SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)]);
-    if (!res.win && final[0] === final[1] && final[1] === final[2]) final[2] = final[2] === "♠" ? "◆" : "♠";
-    for (let i = 0; i < 3; i++) {
-      await sleep(260);
-      reels[i].textContent = final[i];
-      reels[i].classList.add("stopped");
-      sound.play("reel");
-    }
-    clearInterval(reelTimer);
-  }
-
-  fx.casinoResult.textContent = res.win ? "당첨! +" + res.delta + "만" : "꽝. " + res.delta + "만";
-  fx.casinoResult.className = "casino-result " + (res.win ? "win" : "lose");
-  sound.play(res.win ? "win" : "lose");
-  spinning = false;
 }
 
 // =====================================================

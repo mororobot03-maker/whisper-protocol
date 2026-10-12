@@ -2311,3 +2311,117 @@ body:has(.game[data-phase="night"]) {
 .auc-bubble span { display: block; }
 .auc-call { display: block; margin-top: 4px; font-size: 12px; color: #b3541e; }
 .auc-call:empty { display: none; }
+
+/* =====================================================
+   낮 카지노 6종 (casino.js)
+   ===================================================== */
+.app-casino { gap: 10px; }
+.cas-head { display: flex; align-items: center; justify-content: space-between; color: #f5c451; letter-spacing: 1px; font-size: 14px; }
+.cas-left { font-size: 12px; letter-spacing: 0; color: #ffe3a3; padding: 3px 8px; border: 1px solid #f5c45166; border-radius: 10px; }
+.cas-left.empty { color: var(--dim); border-color: #ffffff22; }
+
+.cas-bet { padding: 10px; border: 1px solid #f5c45144; border-radius: 10px; background: #0b0306cc; display: flex; flex-direction: column; gap: 8px; }
+.bet-line { display: flex; align-items: center; gap: 8px; }
+.bet-line small { color: #c9b39a; }
+.bet-line input[type="range"] { flex: 1; min-width: 0; padding: 0; accent-color: #f5c451; }
+.bet-step { width: 32px; height: 32px; padding: 0; font-size: 18px; line-height: 1; }
+.bet-now { min-width: 58px; text-align: right; color: #f5c451; font-size: 13px; }
+.bet-now b { font-size: 20px; }
+.bet-quick { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+.bet-quick button { padding: 6px 0; font-size: 13px; border-color: #f5c45144; color: #ffe3a3; }
+.bet-safe { margin: 0; font-size: 11px; color: #9ad9b5; }
+
+.cas-games { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.cas-game { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px; border-color: #f5c45133; background: #12060acc; }
+.cas-game .cg-ico { font-size: 18px; color: #f5c451; font-weight: 800; height: 22px; }
+.cas-game strong { font-size: 13px; color: #fff3d6; }
+.cas-game small { font-size: 9.5px; color: #b9a07e; text-align: center; line-height: 1.3; }
+.cas-game.on { border-color: #f5c451; background: #3a1a08; box-shadow: 0 0 10px #f5c45144; }
+
+.cas-table { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid #f5c45144; border-radius: 12px; background: radial-gradient(ellipse at 50% 0%, #0f4a2acc 0%, #08281acc 60%, #061a11ee 100%); min-height: 200px; }
+.cas-play { padding: 12px; font-size: 15px; }
+.cas-odds, .cas-note { margin: 0; font-size: 12px; line-height: 1.45; color: #cfe8d8; }
+.cas-note { color: #ffb86b; }
+.cas-result { margin: 0; min-height: 18px; font-size: 13px; font-weight: 700; color: #ffe3a3; text-align: center; }
+.cas-result.win { color: #3dffa2; }
+.cas-result.lose { color: #c9b39a; }
+
+/* 룰렛 */
+.rl-wrap { position: relative; width: 190px; height: 190px; margin: 0 auto; }
+.rl-wheel {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 6px solid #6b4a1f;
+  box-shadow: 0 0 0 2px #f5c451, 0 6px 18px #000a;
+  transition: transform 2s cubic-bezier(0.15, 0.7, 0.2, 1);
+}
+.rl-wheel.spinning { animation: rl-spin 0.5s linear infinite; transition: none; }
+@keyframes rl-spin { to { rotate: 360deg; } }
+.rl-num { position: absolute; left: 50%; top: 50%; width: 16px; margin: -6px 0 0 -8px; font-size: 8px; font-weight: 700; color: #fff; text-align: center; transform-origin: 50% 50%; }
+.rl-pointer { position: absolute; top: -6px; left: 50%; margin-left: -8px; border: 8px solid transparent; border-top: 14px solid #fff3d6; filter: drop-shadow(0 2px 2px #000); z-index: 2; }
+.rl-center { position: absolute; inset: 34%; border-radius: 50%; background: #2a1a0a; border: 2px solid #f5c451; display: grid; place-items: center; font-size: 22px; font-weight: 800; color: #fff3d6; }
+.rl-center.show.red { background: #c8283c; }
+.rl-center.show.black { background: #16161f; }
+.rl-center.show.green { background: #1f9d55; }
+.rl-center.show { animation: bump 0.45s; }
+.rl-bets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.rl-bet { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 7px 4px; font-size: 12px; border-color: #ffffff33; background: #0006; cursor: pointer; border-radius: 6px; border-width: 1px; border-style: solid; }
+.rl-bet small { font-size: 10px; color: #f5c451; }
+.rl-bet.red { background: #c8283c66; }
+.rl-bet.black { background: #16161fcc; }
+.rl-bet.on { border-color: #f5c451; box-shadow: 0 0 0 1px #f5c451 inset; }
+.rl-bet.number input { width: 52px; padding: 2px 4px; font-size: 13px; text-align: center; }
+
+/* 슬롯 */
+.sl-reels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px; border-radius: 10px; background: #1a0a04; border: 2px solid #f5c451; }
+.sl-reel { display: grid; place-items: center; height: 70px; border-radius: 8px; background: linear-gradient(#fff, #e8e2d0 50%, #fff); color: #1a1206; font-size: 36px; font-weight: 800; box-shadow: inset 0 4px 6px #0004, inset 0 -4px 6px #0004; }
+.sl-reel.stopped { animation: bump 0.25s; }
+.sl-reel.hit { background: linear-gradient(#fff7c2, #ffd75e 50%, #fff7c2); color: #a1100a; }
+
+/* 하이로우 · 블랙잭 카드 */
+.hl-steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.hl-steps span { padding: 4px 0; border-radius: 6px; background: #0006; font-size: 11px; text-align: center; color: #b9a07e; }
+.hl-steps span.done { background: #3dffa233; color: #9dffd0; }
+.hl-steps span.next { outline: 1px solid #f5c451; color: #ffe3a3; }
+.hl-row { display: flex; justify-content: center; gap: 12px; min-height: 110px; align-items: center; }
+.hl-card { width: 70px; height: 100px; border-radius: 8px; background: #fffdf6; color: #1a1206; display: grid; place-items: center; box-shadow: 0 4px 10px #0008; border: 2px solid #e8dcc4; }
+.hl-card b { font-size: 34px; }
+.hl-card.back { background: repeating-linear-gradient(45deg, #6b1022, #6b1022 6px, #4a0a18 6px, #4a0a18 12px); color: #f5c45188; border-color: #f5c451; }
+.hl-card.flip { animation: card-flip 0.6s ease-out; }
+.hl-card.ok { border-color: #3dffa2; box-shadow: 0 0 14px #3dffa2aa; }
+.hl-card.bad { border-color: #ff4d6d; box-shadow: 0 0 14px #ff4d6daa; }
+@keyframes card-flip { from { transform: rotateY(90deg) translateY(-10px); opacity: 0; } to { transform: none; opacity: 1; } }
+.hl-card.small { width: 44px; height: 62px; }
+.hl-card.small b { font-size: 20px; }
+.hl-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.hl-btns .hl-cash { grid-column: 1 / -1; }
+.hl-up { color: #3dffa2; border-color: #3dffa266; }
+.hl-down { color: #ff8fa3; border-color: #ff4d6d66; }
+.bj-hand { display: flex; flex-direction: column; gap: 6px; }
+.bj-hand small { color: #cfe8d8; }
+.bj-cards { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* 리듬 채굴 */
+.rh-lane { position: relative; height: 230px; border-radius: 10px; overflow: hidden; background: linear-gradient(#0a0f0c, #12241a); border: 1px solid #3dffa255; }
+.rh-line { position: absolute; left: 0; right: 0; bottom: 30px; height: 4px; background: #3dffa2; box-shadow: 0 0 10px #3dffa2; }
+.rh-note { position: absolute; left: 50%; top: 0; width: 64px; height: 18px; margin-left: -32px; margin-top: -9px; border-radius: 4px; background: linear-gradient(#ffe07a, #f5a623); box-shadow: 0 0 8px #f5c451; will-change: transform; }
+.rh-judge { position: absolute; top: 40%; left: 0; right: 0; text-align: center; font-size: 22px; font-weight: 800; color: #fff; opacity: 0; }
+.rh-judge.pop { animation: judge-pop 0.5s ease-out; }
+.rh-judge.perfect { color: #3dffa2; }
+.rh-judge.good { color: #9ff7ff; }
+.rh-judge.ok { color: #ffe07a; }
+.rh-judge.miss { color: #ff8fa3; }
+@keyframes judge-pop { 0% { opacity: 1; transform: scale(1.3); } 100% { opacity: 0; transform: translateY(-14px); } }
+.rh-tap { padding: 14px; font-size: 16px; border-color: #3dffa2; color: #9dffd0; touch-action: manipulation; }
+
+/* 드론 레이스 */
+.rc-track { display: flex; flex-direction: column; gap: 6px; }
+.rc-lane { position: relative; display: block; height: 52px; padding: 0; overflow: hidden; border-radius: 8px; border: 1px solid #ffffff22; background: repeating-linear-gradient(90deg, #0b1410, #0b1410 22px, #0e1a14 22px, #0e1a14 44px); text-align: left; }
+.rc-lane.on { border-color: #f5c451; box-shadow: 0 0 0 1px #f5c451 inset; }
+.rc-lane.winner { border-color: #3dffa2; box-shadow: 0 0 12px #3dffa288; }
+.rc-info { position: absolute; left: 8px; top: 6px; display: flex; flex-direction: column; gap: 1px; z-index: 1; pointer-events: none; }
+.rc-info strong { font-size: 12px; color: #fff3d6; }
+.rc-info small { font-size: 10px; color: #f5c451; }
+.rc-drone { position: absolute; left: 104px; bottom: 10px; font-size: 22px; }
+.rc-finish { position: absolute; right: 18px; top: 0; bottom: 0; width: 4px; background: repeating-linear-gradient(#fff, #fff 5px, #000 5px, #000 10px); }

@@ -10,9 +10,10 @@ const { Server } = require("socket.io");
 const { ROLES, TEAM_NAMES, OPTIONS, defaultSettings, teamPlan, rolePool, generateRoles, autoLandingDays } = require("./roles");
 const { maxHp, nightOptions, resolveNight } = require("./night");
 const {
-  ITEMS, DEEPFAKE_TEMPLATES, SERVICES, SERVICE_NIGHT_LIMIT, servicePrice, AUCTION, bidStep, GAMBLES,
+  ITEMS, DEEPFAKE_TEMPLATES, SERVICES, SERVICE_NIGHT_LIMIT, servicePrice, AUCTION, bidStep,
   MINER_INCOME, MINER_TURNS,
 } = require("./economy");
+const casino = require("./casino");
 
 const app = express();
 const server = http.createServer(app);
@@ -184,6 +185,7 @@ function assignRoles(game) {
     p.credits += ROLES[p.role].startBonus || 0; // 스폰서 추가 자금
     p.svcUses = {}; // 다크넷 서비스별 이용 횟수 (쓸수록 비싸짐)
     p.miner = 0; // 크립토 채굴기 남은 턴
+    p.casino = null; // 카지노 기록 (하루 판 수 등)
   });
   game.deepfakeUsed = false;
   game.itemSeq = 0;
@@ -272,9 +274,7 @@ function sendEconomy(game, p) {
     }),
     svcLeft: SERVICE_NIGHT_LIMIT - usedTonight,
     svcLimit: SERVICE_NIGHT_LIMIT,
-    gambles: Object.keys(GAMBLES).map((id) => ({ id, ...GAMBLES[id] })),
     deepfakeTemplates: { injured: "OOO가 부상을 입었다!", healed: "리퍼닥이 OOO을(를) 치료했다!" },
-    mine: { done: mineState(game, p).done, total: MINE_REWARDS.length, next: MINE_REWARDS[mineState(game, p).done] || 0 },
   });
 }
 
@@ -296,7 +296,7 @@ function nightPlayer(socket) {
   return { game, me };
 }
 
-// 카지노(도박·채굴): 낮에만
+// 카지노: 낮에만
 function casinoPlayer(socket) {
   const game = games[socket.data.code];
   if (!game || game.phase !== "day") return null;
@@ -650,106 +650,26 @@ function transfer(game, me, data) {
   sendEconomy(game, target);
 }
 
-// 도박: 바로 결과가 나옴
-function gamble(game, me, data) {
-  const g = own(GAMBLES, data?.kind);
-  if (!g) return;
-  const amount = validAmount(data.amount, me.credits);
-  if (!amount) {
-    return io.to(me.id).emit("gambleResult", { kind: data.kind, error: "베팅액을 확인하세요. (1 ~ " + me.credits + "만)" });
-  }
-
-  const win = Math.random() < g.chance;
-  const delta = win ? amount * (g.payout - 1) : -amount;
-  me.credits += delta;
-
-  // 결과는 화면이 룰렛/슬롯 애니메이션을 끝낸 뒤에 보여줌
-  io.to(me.id).emit("gambleResult", { kind: data.kind, name: g.name, win, delta, credits: me.credits });
+// 카지노 (casino.js가 판정). 결과는 이 사람에게만
+function playCasino(game, me, data) {
+  const res = casino.handle(me, game.day, data);
+  io.to(me.id).emit("casinoResult", res);
+  if (res.error) return;
   sendStatus(game);
-  sendEconomy(game, me);
+  sendCasino(game, me);
 }
 
-// =====================================================
-//  채굴 미션 (카지노)
-//  서버가 문제를 내고 정답을 채점 → 화면을 조작해도 크레딧을 거저 얻을 수 없음
-//  낮마다 미션 5개. 갈수록 어렵고 보상도 커짐
-// =====================================================
-const MINE_REWARDS = [2, 2, 3, 3, 5]; // 미션별 보상 (만)
-const MINE_SECONDS = 10; // 문제 하나 제한 시간
-const MINE_LOCK_MS = 5000; // 틀리거나 시간 초과면 5초 쉬기
-// 미션 순서: 해시 찾기 / 블록 순서 맞추기를 번갈아, 점점 어렵게
-const MINE_PLAN = [
-  { type: "hash", cells: 9, prefix: 3, share: 1 },
-  { type: "order", count: 5 },
-  { type: "hash", cells: 12, prefix: 3, share: 2 },
-  { type: "order", count: 7 },
-  { type: "hash", cells: 16, prefix: 4, share: 3 },
-];
-const HEX = "0123456789ABCDEF";
-const randHex = (n) => Array.from({ length: n }, () => HEX[Math.floor(Math.random() * 16)]).join("");
-
-// 오늘 낮의 내 채굴 기록. 날이 바뀌면 새로 시작
-function mineState(game, p) {
-  const key = String(game.day);
-  if (!p.mine || p.mine.key !== key) p.mine = { key, done: 0, challenge: null, lockUntil: 0 };
-  return p.mine;
+function sendCasino(game, p) {
+  if (p.connected) io.to(p.id).emit("casinoState", casino.publicState(p, game.day));
 }
 
-function mineStart(game, me) {
-  const m = mineState(game, me);
-  if (m.done >= MINE_REWARDS.length) return io.to(me.id).emit("mineResult", { error: "오늘의 채굴 미션을 모두 끝냈다." });
-  const wait = m.lockUntil - Date.now();
-  if (wait > 0) return io.to(me.id).emit("mineResult", { error: "과열! " + Math.ceil(wait / 1000) + "초 뒤에 다시 시도" });
-
-  const plan = MINE_PLAN[m.done];
-  const pub = { mission: m.done + 1, total: MINE_REWARDS.length, reward: MINE_REWARDS[m.done], seconds: MINE_SECONDS, type: plan.type };
-  let answer;
-  if (plan.type === "hash") {
-    // 정답 1개: target으로 시작 / 나머지: 앞 share글자까지만 같고 그 다음 글자가 다름 (헷갈리게)
-    const target = randHex(plan.prefix);
-    const cells = new Set();
-    const decoys = [];
-    while (decoys.length < plan.cells - 1) {
-      const head = target.slice(0, plan.share);
-      let next = HEX[Math.floor(Math.random() * 16)];
-      if (next === target[plan.share]) continue;
-      const code = head + next + randHex(6 - plan.share - 1);
-      if (cells.has(code)) continue;
-      cells.add(code);
-      decoys.push(code);
-    }
-    const right = target + randHex(6 - plan.prefix);
-    const list = shuffle([right, ...decoys]);
-    answer = list.indexOf(right);
-    Object.assign(pub, { target, cells: list });
-  } else {
-    // 블록 순서: 흩어진 숫자 1~N을 작은 수부터 차례로
-    const nums = shuffle(Array.from({ length: plan.count }, (_, i) => i + 1));
-    answer = nums.map((_, i) => i).sort((a, b) => nums[a] - nums[b]).join(",");
-    Object.assign(pub, { cells: nums });
+// 낮이 끝날 때 진행 중이던 카지노 판 정리
+function settleCasino(game) {
+  for (const p of game.players) {
+    const r = casino.settle(p);
+    if (r) econMsg(p, "낮이 끝나 " + casino.GAMES[r.game].name + " 판이 정리됐다. " + r.back + "만 돌려받음" + (r.gain ? " (+" + r.gain + ")" : ""));
   }
-  m.challenge = { answer, expires: Date.now() + (MINE_SECONDS + 1) * 1000 }; // 1초는 통신 여유
-  io.to(me.id).emit("mineChallenge", pub);
-}
-
-function mineAnswer(game, me, data) {
-  const m = mineState(game, me);
-  const c = m.challenge;
-  if (!c) return io.to(me.id).emit("mineResult", { error: "문제가 만료되었다. 다시 시작하자." });
-  m.challenge = null;
-  const given = Array.isArray(data?.answer) ? data.answer.map(Number).join(",") : Number(data?.answer);
-  const ok = Date.now() <= c.expires && given === c.answer;
-  if (!ok) {
-    m.lockUntil = Date.now() + MINE_LOCK_MS;
-    io.to(me.id).emit("mineResult", { ok: false, timeout: Date.now() > c.expires, lock: MINE_LOCK_MS / 1000 });
-    return;
-  }
-  const reward = MINE_REWARDS[m.done];
-  m.done++;
-  me.credits += reward;
-  io.to(me.id).emit("mineResult", { ok: true, delta: reward, done: m.done, total: MINE_REWARDS.length });
   sendStatus(game);
-  sendEconomy(game, me);
 }
 
 // =====================================================
@@ -889,9 +809,11 @@ function startDay(game) {
       info: first + "그룹 채팅으로 이야기하고, 카지노에서 크레딧을 벌어 두세요." + (voteToday ? " 낮이 끝나면 투표." : ""),
     };
   });
-  sendEconomyAll(game); // 채굴 남은 횟수 등 오늘 기준으로
+  sendEconomyAll(game);
+  for (const p of alivePlayers(game)) sendCasino(game, p); // 오늘 남은 판 수 (하루 10판)
 
   schedule(game, seconds, () => {
+    settleCasino(game);
     if (voteToday) startVote(game);
     else endDay(game);
   });
@@ -1055,6 +977,7 @@ function backToLobby(game) {
     p.credits = 0;
     p.svcUses = {};
     p.miner = 0;
+    p.casino = null;
   }
   game.today = emptyDayEffects();
   game.deepfakeUsed = false;
@@ -1283,17 +1206,10 @@ io.on("connection", (socket) => {
     const ctx = moneyPlayer(socket);
     if (ctx) transfer(ctx.game, ctx.me, data);
   });
-  on("gamble", (data) => {
+  on("casino", (data) => {
     const ctx = casinoPlayer(socket);
-    if (ctx) gamble(ctx.game, ctx.me, data);
-  });
-  on("mineStart", () => {
-    const ctx = casinoPlayer(socket);
-    if (ctx) mineStart(ctx.game, ctx.me);
-  });
-  on("mineAnswer", (data) => {
-    const ctx = casinoPlayer(socket);
-    if (ctx) mineAnswer(ctx.game, ctx.me, data);
+    if (ctx) playCasino(ctx.game, ctx.me, data);
+    else socket.emit("casinoResult", { error: "카지노는 낮에만 열려요." });
   });
 
   // 투표 (마감 전까지 바꿀 수 있음)
