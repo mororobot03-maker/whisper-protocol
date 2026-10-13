@@ -177,6 +177,8 @@ function setupTabs(data) {
     casino: day,
     vote: !!data.canVote,
     memo: true,
+    log: true,
+    dex: true,
   };
   for (const btn of tabs.querySelectorAll("button")) btn.classList.toggle("hidden", !show[btn.dataset.tab]);
   document.querySelector("#chat-tab-label").textContent = data.phase === "day" ? "그룹 채팅" : "채팅";
@@ -1048,6 +1050,7 @@ socket.on("yourRole", (role) => {
   chatLog.innerHTML = ""; // 새 게임이니 지난 대화, 기록 지우기
   resetMemo();
   resetDM();
+  resetLog();
   lastHp = null;
   shownCredits = null;
   intelLog.innerHTML = "";
@@ -1114,6 +1117,23 @@ function drawStatus(s) {
     flashHurt(); // 체력이 줄면 내 화면 가장자리만 붉게
     sound.play("hurt");
   }
+  if (lastHp !== null && lastHp > 0 && !s.alive) {
+    // 사망 알림은 아침 CCTV / 처형 연출이 끝난 뒤에 (미리 보이면 김이 샘)
+    pendingDeath = ({
+      kicker: currentDay + "일차",
+      title: "당신은 사망했습니다",
+      tone: "dead",
+      lines: [
+        { icon: "skull", tone: "bad", text: "이제 말할 수도, 투표할 수도 없어요." },
+        { icon: "eye", text: "관전 모드: 밤에는 모든 1:1 대화를, 낮에는 그룹 채팅을 볼 수 있어요." },
+      ],
+    });
+    // 아침·처형 연출이 없는 경우(접속 끊김 등)에만 1.5초 뒤 바로 보여 줌
+    setTimeout(() => {
+      const ph = screens.game.dataset.phase;
+      if (pendingDeath && ph !== "morning" && ph !== "result") onReplayDone("");
+    }, 1500);
+  }
   lastHp = s.hp;
 
   // ----- 크레딧: 숫자가 굴러가며 바뀌고, 옆에 +/- 표시 -----
@@ -1160,6 +1180,7 @@ socket.on("status", (s) => {
 socket.on("economy", (eco) => drawEconomy(eco));
 socket.on("econMsg", (text) => {
   addLine("◆ " + text, "system econ");
+  if (/낙찰!|보냈다|받았다|의뢰 완료|위조 완료|사용 →|정리됐다/.test(text)) addLog(currentDay, "money", text);
   if (text.includes("의뢰 완료")) ghostFace("smile");
   else if (text.includes("다크넷은 하룻밤") || text.includes("크레딧이 부족")) ghostFace("wary");
   if (text.includes("더 높은 입찰")) {
@@ -1254,6 +1275,14 @@ socket.on("phase", (data) => {
   for (const line of data.private || []) {
     intelLog.appendChild(make("li", null, data.day + "일차 · " + line));
     if (!isVisible("info")) setDot("info", true);
+  }
+  // 게임 기록 + 아침 알림 카드
+  if (data.phase !== "intro") {
+    for (const line of data.lines || []) addLog(data.day, "public", line);
+    for (const line of data.private || []) addLog(data.day, "private", line);
+  }
+  if (data.phase === "morning" && data.private && data.private.length) {
+    queuePrivateCard(data.day - 1, data.private, !data.sequence);
   }
   drawVote(data);
   phaseInfo.textContent = data.info || "";
@@ -1659,5 +1688,184 @@ socket.on("tapLog", ({ target, msgs }) => {
   drawDM();
   toast("도청 시작 · " + target + "의 1:1 대화가 메신저에 들어옵니다.");
 });
+
+// =====================================================
+//  아침 알림 카드: 나만 받은 밤 결과를 종류별 아이콘으로
+//  방패 = 방어 · 눈 = 정보 · 코인 = 돈 · 십자 = 치료 · 해골 = 위험
+// =====================================================
+function classifyPrivate(text) {
+  if (/방해했다|매수했다|투여했다|주선했다/.test(text)) return { icon: "eye", tone: "info" }; // 내 능력이 통한 결과
+  if (/막아냈|막혔|방화벽|장갑|대신 받아/.test(text)) return { icon: "shield", tone: "good" };
+  if (/보수|\+\d+만|크레딧을 받/.test(text)) return { icon: "credit", tone: "money" };
+  if (/치료|드론/.test(text)) return { icon: "medic", tone: "good" };
+  if (/독|공격이 무산|실패|방해받아|사라졌다/.test(text)) return { icon: "skull", tone: "bad" };
+  if (/조사|직업|감시|체력|지목|통신 기록|명부|송금 로그|크레딧:|방해했다|매수했다|투여했다/.test(text)) return { icon: "eye", tone: "info" };
+  return { icon: "inbox", tone: "" };
+}
+
+let pendingPrivate = null;
+let pendingDeath = null;
+function queuePrivateCard(nightDay, lines, now) {
+  pendingPrivate = {
+    kicker: nightDay + "일차 밤 · 나만 아는 결과",
+    title: "나에게 일어난 일",
+    lines: lines.map((text) => ({ ...classifyPrivate(text), text })),
+  };
+  if (now) onReplayDone("morning");
+}
+
+// fx.js가 아침 CCTV 재생을 끝내면 부름
+function onReplayDone(mode) {
+  if (mode === "morning" && pendingPrivate) {
+    showNotice(pendingPrivate);
+    pendingPrivate = null;
+  }
+  if (pendingDeath) showNotice(pendingDeath);
+  pendingDeath = null;
+  flushNotices();
+}
+
+// =====================================================
+//  게임 기록: 날짜별로 공개 발표 / 나만 아는 것 / 거래
+// =====================================================
+const gameLog = { el: document.querySelector("#game-log"), entries: [], filter: "all" };
+const LOG_LABEL = { public: "📢", private: "🔒", money: "◆" };
+
+function resetLog() {
+  gameLog.entries = [];
+  drawLog();
+}
+
+function addLog(day, kind, text) {
+  gameLog.entries.push({ day, kind, text });
+  drawLog();
+}
+
+function drawLog() {
+  const box = gameLog.el;
+  box.innerHTML = "";
+  const list = gameLog.entries.filter((e) => gameLog.filter === "all" || e.kind === gameLog.filter);
+  if (!list.length) {
+    box.appendChild(make("p", "inv-empty", "아직 기록이 없어요."));
+    return;
+  }
+  let day = null;
+  let ul = null;
+  for (const e of list) {
+    if (e.day !== day) {
+      day = e.day;
+      box.appendChild(make("h4", "log-day", day + "일차"));
+      ul = make("ul", "log-list");
+      box.appendChild(ul);
+    }
+    const li = make("li", "log-" + e.kind);
+    li.appendChild(make("span", "log-tag", LOG_LABEL[e.kind]));
+    li.appendChild(make("span", null, e.text));
+    ul.appendChild(li);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+document.querySelector("#log-filter").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-f]");
+  if (!b) return;
+  gameLog.filter = b.dataset.f;
+  for (const x of b.parentElement.children) x.classList.toggle("on", x === b);
+  drawLog();
+});
+
+// =====================================================
+//  도감: 서버가 게임 시작 때 보내는 설명 모음
+// =====================================================
+let catalog = null;
+let dexTab = "roles";
+const dexBody = document.querySelector("#dex-body");
+const TEAM_KO = { citizen: "시민팀", syndicate: "신디케이트", third: "제3세력" };
+const WHEN_KO = { now: "즉시", tonight: "오늘 밤", morning: "아침에 결과", tomorrow: "내일 투표", multi: "여러 날" };
+
+socket.on("catalog", (c) => {
+  catalog = c;
+  drawDex();
+});
+
+function dexCard(iconEl, title, sub, desc, cls) {
+  const card = make("div", "dex-card " + (cls || ""));
+  const head = make("div", "dex-head");
+  if (iconEl) head.appendChild(iconEl);
+  const t = make("div");
+  t.appendChild(make("strong", null, title));
+  if (sub) t.appendChild(make("small", null, sub));
+  head.appendChild(t);
+  card.appendChild(head);
+  card.appendChild(make("p", null, desc));
+  return card;
+}
+
+function drawDex() {
+  dexBody.innerHTML = "";
+  if (!catalog) {
+    dexBody.appendChild(make("p", "inv-empty", "게임이 시작되면 열려요."));
+    return;
+  }
+  const pool = new Set(catalog.pool);
+  if (dexTab === "roles") {
+    for (const team of ["citizen", "syndicate", "third"]) {
+      dexBody.appendChild(make("h4", "log-day " + team, TEAM_KO[team]));
+      for (const id in catalog.roles) {
+        const r = catalog.roles[id];
+        if (r.team !== team) continue;
+        const card = dexCard(roleIcon(id, "dex-ico"), r.name, pool.has(id) ? "이번 판에 나올 수 있음" : "이번 판엔 안 나옴", r.desc, team + (pool.has(id) ? "" : " off"));
+        dexBody.appendChild(card);
+      }
+    }
+  } else if (dexTab === "items") {
+    const r = catalog.rules.auction;
+    dexBody.appendChild(make("p", "dex-note", "밤마다 " + r.lots + "건 · 건당 " + r.lotSeconds + "초 · 1인당 하룻밤 " + r.winLimit + "건 낙찰. 무엇이 팔렸는지는 공개, 누가 샀는지는 비공개."));
+    for (const cat of [["hack", "해킹 (메신저에 작용)"], ["defense", "방어"], ["info", "정보·기타"]]) {
+      dexBody.appendChild(make("h4", "log-day", cat[1]));
+      for (const id in catalog.items) {
+        const it = catalog.items[id];
+        if (it.cat !== cat[0]) continue;
+        dexBody.appendChild(dexCard(icon(id, "dex-ico"), it.name, "시작가 " + it.price + "만 · " + WHEN_KO[it.when], it.desc, "item " + it.cat));
+      }
+    }
+  } else if (dexTab === "services") {
+    dexBody.appendChild(make("p", "dex-note", "경매와 별개로 언제든 구매. 하룻밤 " + catalog.rules.serviceLimit + "건까지, 한 번 쓴 서비스는 다음부터 1.5배."));
+    for (const id in catalog.services) {
+      const sv = catalog.services[id];
+      dexBody.appendChild(dexCard(icon(id, "dex-ico"), sv.name, "기본 " + sv.price + "만", sv.desc, "item"));
+    }
+  } else if (dexTab === "casino") {
+    const c = catalog.rules.casino;
+    dexBody.appendChild(make("p", "dex-note", "낮에만 열림 · 하루 " + c.playsPerDay + "판 · 판돈 " + c.minBet + " ~ " + c.maxBet + "만. 져도 판돈은 그대로 돌려받아요."));
+    for (const id in catalog.casino) {
+      const g = catalog.casino[id];
+      dexBody.appendChild(dexCard(make("span", "dex-ico cg", GAME_ICONS[id] || "★"), g.name, null, g.odds, "item"));
+    }
+  } else {
+    const rows = [
+      ["하루 흐름", "1일차 낮 → 밤 → 아침(CCTV) → 낮 → 투표(2일차부터) → 밤 … 착륙일 투표가 끝나면 착륙."],
+      ["낮", "카지노 · 그룹 채팅 · 송금. 낮이 시작될 때 수입 (VIP 30만, 나머지 10만)."],
+      ["밤", "통행금지. 직업 능력 · 1:1 메신저 · 경매장 · 다크넷 · 송금."],
+      ["투표", "최다 득표자는 비행선 밖으로. 동점이면 없음. 모두 투표하면 바로 마감."],
+      ["체력", "VIP 3, 나머지 2. 부상이어도 능력·아이템은 그대로 사용 가능."],
+      ["신디케이트", "밤마다 공격 투표 또는 특수 능력 중 하나. 표가 갈리면 50% 확률로만 공격."],
+      ["보디가드", "막아내면 경호 보수 +" + catalog.rules.bodyguardReward + "만."],
+      ["승리", "시민팀: 신디케이트 전멸 또는 착륙(" + catalog.rules.landingDays + "일차)까지 VIP 생존. 신디케이트: VIP 사망 또는 시민팀에 VIP 혼자 남음. 제3세력은 각자 조건."],
+    ];
+    for (const [t, d] of rows) dexBody.appendChild(dexCard(null, t, null, d, "rule"));
+  }
+}
+
+document.querySelector("#dex-tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-d]");
+  if (!b) return;
+  dexTab = b.dataset.d;
+  for (const x of b.parentElement.children) x.classList.toggle("on", x === b);
+  sound.play("tab");
+  drawDex();
+});
+drawDex();
+drawLog();
 
 fillIcons(); // HTML에 적어둔 아이콘 자리 채우기

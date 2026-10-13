@@ -361,7 +361,21 @@ async function playExecution(item, room, at) {
   return sleep(t(1800));
 }
 
-// 사건 하나 재생
+// CCTV 화면 위쪽 시각 표시 (사건마다 몇 분씩 흘러감)
+let camClock = 0;
+function camHead(stage) {
+  const h = Math.floor(camClock / 60);
+  const m = camClock % 60;
+  replay.head.textContent = "● REC  CAM-" + String((camClock % 7) + 1).padStart(2, "0") + "  0" + h + ":" + String(m).padStart(2, "0") + "  " + stage;
+}
+
+// 자막 한 줄 바꾸기 (tone: good / bad / "")
+function caption(text, tone) {
+  replay.sub.textContent = text;
+  replay.sub.className = "replay-sub " + (tone || "");
+}
+
+// 사건 하나 재생: 방문 → 공격(또는 치료) → 방어·회복 → 결과 순서로 천천히
 async function playEvent(item) {
   const room = roomOf(item.name);
   if (!room) return sleep(1600);
@@ -369,32 +383,74 @@ async function playEvent(item) {
 
   if (item.type === "executed") return playExecution(item, room, at);
 
-  const kind = item.type === "healed" ? "medic" : "attacker";
+  camClock += 17 + Math.floor(Math.random() * 40);
+  const healing = item.type === "healed";
+  const kind = healing ? "medic" : "attacker";
+
+  // 1) 방문
+  camHead("복도");
+  caption((healing ? "의료진" : "누군가") + "가 " + item.name + "의 방으로 향한다…", "");
   const goBack = await figureTo(room, kind);
 
-  if (kind === "attacker") {
+  // 2) 공격 / 치료 시작
+  camHead(healing ? "치료" : "충돌");
+  if (!healing) {
     room.classList.add("fx-hit");
     sound.play("slash");
-    burst("slash", "", at, [
+    caption("공격!", "bad");
+    await burst("slash", "", at, [
       { transform: "translate(-50%,-50%) rotate(-35deg) scaleX(0)", opacity: 1 },
       { transform: "translate(-50%,-50%) rotate(-35deg) scaleX(1.2)", opacity: 1, offset: 0.4 },
       { transform: "translate(-50%,-50%) rotate(-35deg) scaleX(1.4)", opacity: 0 },
-    ], 600);
+    ], 700);
   } else {
     room.classList.add("fx-heal");
     sound.play("heal");
-    burst("plus", "✚", at, [
+    caption("치료 중…", "good");
+    await burst("plus", "✚", at, [
       { transform: "translate(-50%,-50%) scale(0.4)", opacity: 0 },
       { transform: "translate(-50%,-80%) scale(1.3)", opacity: 1, offset: 0.4 },
       { transform: "translate(-50%,-140%) scale(1)", opacity: 0 },
-    ], 900);
+    ], 1000);
   }
-  await sleep(650);
-  if (item.type === "dead") {
-    setDead(item.name, true); // 방 불이 꺼지고 비어버림
+  await sleep(300);
+
+  // 3) 방어·회복 / 피해
+  if (healing) {
+    burst("fx-icon shield", "", at, [
+      { transform: "translate(-50%,-50%) scale(0.3)", opacity: 0 },
+      { transform: "translate(-50%,-50%) scale(1.15)", opacity: 1, offset: 0.35 },
+      { transform: "translate(-50%,-50%) scale(1)", opacity: 0 },
+    ], 1100).catch(() => {});
+    map.fx.lastChild?.appendChild(icon("shield"));
+  } else if (item.type === "injured") {
+    burst("fx-icon crack", "", at, [
+      { transform: "translate(-50%,-60%) scale(0.4)", opacity: 0 },
+      { transform: "translate(-50%,-90%) scale(1.2)", opacity: 1, offset: 0.35 },
+      { transform: "translate(-50%,-130%) scale(1)", opacity: 0 },
+    ], 1100).catch(() => {});
+    map.fx.lastChild?.appendChild(icon("heartCracked"));
+    sound.play("hurt");
+  } else if (item.type === "dead") {
+    // 사망: 화면이 붉게 번쩍이고, 해골이 떠오르며 방 불이 꺼짐
+    map.el.classList.add("death-flash");
+    burst("fx-icon skull", "", at, [
+      { transform: "translate(-50%,-50%) scale(0.3)", opacity: 0 },
+      { transform: "translate(-50%,-70%) scale(1.5)", opacity: 1, offset: 0.3 },
+      { transform: "translate(-50%,-120%) scale(1.3)", opacity: 0 },
+    ], 1500).catch(() => {});
+    map.fx.lastChild?.appendChild(icon("skull"));
+    setDead(item.name, true);
     sound.play("down");
   }
+  await sleep(item.type === "dead" ? 1300 : 1000);
+
+  // 4) 결과
+  camHead("기록");
+  caption(item.text, healing ? "good" : "bad");
   await goBack();
+  await sleep(600);
+  map.el.classList.remove("death-flash");
   room.classList.remove("fx-hit", "fx-heal");
 }
 
@@ -446,22 +502,27 @@ async function playSequence(sequence, mode, delay) {
   if (id !== playId) return;
 
   openReplay(mode);
+  camClock = 60 + Math.floor(Math.random() * 60); // 새벽 1시 무렵부터
   for (const item of sequence) {
     if (id !== playId) return;
-    replay.sub.textContent = item.text;
-    replay.sub.className = "replay-sub " + (item.type === "healed" ? "good" : item.type ? "bad" : "");
     if (item.type) await playEvent(item);
-    else await sleep(1800);
+    else {
+      caption(item.text, "");
+      await sleep(2200);
+    }
   }
   if (id !== playId) return;
   await sleep(700);
-  if (id === playId) closeReplay();
+  if (id === playId) {
+    closeReplay();
+    if (typeof onReplayDone === "function") onReplayDone(mode);
+  }
 }
 
 function stopSequence() {
   playId++;
   closeReplay();
-  map.el.classList.remove("alarm", "verdict");
+  map.el.classList.remove("alarm", "verdict", "death-flash");
   map.walker.className = "mwalker";
   map.hatch.className = "hatch";
   map.fx.innerHTML = "";
@@ -484,6 +545,60 @@ function showPhaseCard(title, sub, tone) {
   card.classList.add("show");
   clearTimeout(cardTimer);
   cardTimer = setTimeout(() => card.classList.remove("show"), calm ? 600 : PHASE_CARD_MS);
+}
+
+// =====================================================
+//  알림 카드: "나에게 일어난 일"을 화면 가운데에 크게
+//  여러 개가 오면 차례로 보여 줌. 재생(CCTV) 중에는 끝날 때까지 기다림
+// =====================================================
+const notice = {
+  el: document.querySelector("#notice"),
+  kicker: document.querySelector("#notice-kicker"),
+  title: document.querySelector("#notice-title"),
+  list: document.querySelector("#notice-list"),
+  ok: document.querySelector("#notice-ok"),
+  queue: [],
+  open: false,
+};
+
+// card = { kicker, title, tone, lines: [{ icon, tone, text }] }
+function showNotice(card) {
+  notice.queue.push(card);
+  if (!notice.open && replay.el.classList.contains("hidden")) nextNotice();
+}
+
+function nextNotice() {
+  const card = notice.queue.shift();
+  if (!card) {
+    notice.open = false;
+    notice.el.classList.add("hidden");
+    return;
+  }
+  notice.open = true;
+  notice.kicker.textContent = card.kicker || "";
+  notice.title.textContent = card.title;
+  notice.el.className = "notice " + (card.tone || "");
+  notice.list.innerHTML = "";
+  card.lines.forEach((line, i) => {
+    const li = el("li", "nl " + (line.tone || ""));
+    li.style.animationDelay = (calm ? 0 : 0.15 + i * 0.25) + "s";
+    const ico = el("span", "nl-ico");
+    ico.appendChild(icon(line.icon || "inbox"));
+    li.append(ico, el("span", "nl-text", line.text));
+    notice.list.appendChild(li);
+  });
+  sound.play(card.tone === "dead" ? "down" : "ping");
+  notice.ok.focus();
+}
+
+notice.ok.addEventListener("click", () => {
+  sound.play("click");
+  nextNotice();
+});
+
+// 재생이 끝나면 밀린 알림을 보여 줌
+function flushNotices() {
+  if (!notice.open && notice.queue.length) nextNotice();
 }
 
 // =====================================================

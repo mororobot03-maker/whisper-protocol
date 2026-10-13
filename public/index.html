@@ -114,6 +114,8 @@
         <button data-tab="casino"><i data-icon="appCasino"></i><span>카지노</span><i class="dot"></i></button>
         <button data-tab="vote"><i data-icon="appVote"></i><span>투표</span><i class="dot"></i></button>
         <button data-tab="memo"><i data-icon="appMemo"></i><span>메모</span><i class="dot"></i></button>
+        <button data-tab="log"><i data-icon="appLog"></i><span>기록</span><i class="dot"></i></button>
+        <button data-tab="dex"><i data-icon="appDex"></i><span>도감</span><i class="dot"></i></button>
       </nav>
 
       <!-- 채팅 (PC에서는 항상 보임) -->
@@ -274,6 +276,31 @@
           <textarea id="memo-free" class="memo-free" maxlength="4000" placeholder="알아낸 것, 누가 무슨 말을 했는지 적어 두세요."></textarea>
         </section>
 
+        <!-- 게임 기록: 날짜별 공개 발표 + 나만 아는 결과 + 내 거래 -->
+        <section class="pane app app-log" data-pane="log">
+          <h3 class="pane-title">게임 기록</h3>
+          <div id="log-filter" class="log-filter">
+            <button type="button" data-f="all" class="on">전체</button>
+            <button type="button" data-f="public">공개 발표</button>
+            <button type="button" data-f="private">나만 아는 것</button>
+            <button type="button" data-f="money">거래</button>
+          </div>
+          <div id="game-log" class="game-log"></div>
+        </section>
+
+        <!-- 도감: 직업 · 경매 · 다크넷 · 카지노 · 규칙 -->
+        <section class="pane app app-dex" data-pane="dex">
+          <h3 class="pane-title">도감</h3>
+          <div id="dex-tabs" class="log-filter">
+            <button type="button" data-d="roles" class="on">직업</button>
+            <button type="button" data-d="items">경매</button>
+            <button type="button" data-d="services">다크넷</button>
+            <button type="button" data-d="casino">카지노</button>
+            <button type="button" data-d="rules">규칙</button>
+          </div>
+          <div id="dex-body" class="dex-body"></div>
+        </section>
+
         <!-- 투표 -->
         <section class="pane app app-vote" data-pane="vote">
           <h3 class="pane-title">추방 대상 선택</h3>
@@ -307,6 +334,16 @@
     <div id="replay-head" class="replay-head"></div>
     <div id="replay-slot" class="replay-slot"></div>
     <p id="replay-sub" class="replay-sub"></p>
+  </div>
+
+  <!-- 알림 카드: 나에게 일어난 일 (아침 결과, 사망 등) -->
+  <div id="notice" class="notice hidden" role="dialog" aria-modal="true" aria-labelledby="notice-title">
+    <div class="notice-card">
+      <small id="notice-kicker" class="notice-kicker"></small>
+      <h3 id="notice-title" class="notice-title"></h3>
+      <ul id="notice-list" class="notice-list"></ul>
+      <button id="notice-ok" class="primary" type="button">확인</button>
+    </div>
   </div>
 
   <!-- 단계 전환 타이틀 카드 (1.2초) -->

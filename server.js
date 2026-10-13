@@ -30,7 +30,8 @@ const FAST = Number(process.env.FAST_SECONDS) || 0; // 값이 있으면 모든 �
 
 const INTRO_SECONDS = 9; // 시작 연출 (이륙 → 직업 공개)
 const MORNING_SECONDS = 10; // 아침 최소 시간. 사건이 많으면 자동으로 늘어남
-const SECONDS_PER_EVENT = 3.2; // 사건 하나당 지도 애니메이션 + 자막 시간
+const SECONDS_PER_EVENT = 6; // 사건 하나당 CCTV 재생 시간 (방문 → 공격 → 방어·회복 → 결과)
+const SECONDS_PER_LINE = 2.6; // 글자만 있는 방송 한 줄
 const SECONDS_PER_EXECUTION = 8.5; // 처형 연출 (판결 → 에어락 카운트다운 → 추방 → 정적)
 const BASE_INCOME = 10; // 매 턴 기본 수입 (만 크레딧)
 const VIP_INCOME = 30;
@@ -204,6 +205,23 @@ function assignRoles(game) {
     const others = game.players.filter((t) => t !== p);
     p.bountyTarget = others[Math.floor(Math.random() * others.length)].id;
   }
+
+  // 도감: 직업 · 경매 아이템 · 다크넷 · 카지노 설명 (모두 같은 내용)
+  io.to("game:" + game.code).emit("catalog", {
+    roles: ROLES,
+    teams: TEAM_NAMES,
+    pool: game.pool,
+    items: ITEMS,
+    services: SERVICES,
+    casino: casino.GAMES,
+    rules: {
+      auction: AUCTION,
+      serviceLimit: SERVICE_NIGHT_LIMIT,
+      casino: casino.CASINO,
+      landingDays: game.landingDays,
+      bodyguardReward: 30,
+    },
+  });
 
   // 각자에게 "자기 직업만" 따로 보냄. 신디케이트는 동료 이름도 받음
   const syndicate = game.players.filter((p) => p.team === "syndicate");
@@ -693,7 +711,7 @@ function startGame(game) {
 
 // 방송으로 보여줄 시간: 줄 수에 맞춰 늘어남
 function sequenceSeconds(sequence, min) {
-  const total = sequence.reduce((t, item) => t + (item.type === "executed" ? SECONDS_PER_EXECUTION : SECONDS_PER_EVENT), 0);
+  const total = sequence.reduce((t, item) => t + (item.type === "executed" ? SECONDS_PER_EXECUTION : item.type ? SECONDS_PER_EVENT : SECONDS_PER_LINE), 0);
   return sec(Math.max(min, Math.ceil(3.5 + total))); // 3.5초: 단계 타이틀 카드 + 여유
 }
 
