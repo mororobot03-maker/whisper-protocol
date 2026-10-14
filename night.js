@@ -102,7 +102,7 @@ function hasFx(game, p, key) {
 
 // 조사에 "진짜"로 보이는 직업 id (디코이, 대역 배우, 도플갱어는 위장)
 function shownRole(game, t) {
-  if (hasFx(game, t, "decoy")) return "citizen";
+  if (hasFx(game, t, "decoy")) return game.decoyRole || "citizen";
   if (t.role === "double") return "vip";
   if (t.role === "doppelganger") return game.disguise[t.id];
   return t.role;

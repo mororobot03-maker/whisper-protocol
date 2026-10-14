@@ -24,7 +24,7 @@ const ITEMS = {
   armor:    { name: "피하 장갑",        cat: "defense", price: 30, target: "none",     when: "tonight",  desc: "오늘 밤 받는 피해 1 무효", pitch: "칼날 한 번쯤은 거뜬히 막아내는 인공 피부입니다." },
   proxy:    { name: "프록시",           cat: "defense", price: 30, target: "none",     when: "tonight",  desc: "오늘 밤 나를 향한 능력·지목이 다른 랜덤 1명에게 튕겨 나감", pitch: "누가 당신을 노리든, 엉뚱한 사람에게 가게 됩니다." },
   firewall: { name: "방화벽",           cat: "defense", price: 20, target: "none",     when: "tonight",  desc: "오늘 밤 넷러너·화이트햇·인포브로커와 채팅 해킹(도청·교란·차단·위조·기록 열람)과 계좌 해킹을 차단", pitch: "해커들에게는 악몽 같은 물건이죠." },
-  decoy:    { name: "홀로그램 디코이",  cat: "defense", price: 20, target: "none",     when: "tonight",  desc: "오늘 밤 나에 대한 조사가 \"시민\"으로 나옴", pitch: "조사관 눈에는 평범한 승객으로 보일 겁니다." },
+  decoy:    { name: "홀로그램 디코이",  cat: "defense", price: 20, target: "none",     when: "tonight",  desc: "오늘 밤 나에 대한 조사가 \"시민\"으로 나옴 (시민을 금지한 판이면 다른 시민팀 직업)", pitch: "조사관 눈에는 평범한 승객으로 보일 겁니다." },
   // ----- 정보·기타 -----
   scanner:  { name: "생체 스캐너",      cat: "info",    price: 20, target: "player",   when: "morning",  desc: "대상의 정확한 남은 체력 확인 (아침에 결과)", pitch: "겉으론 멀쩡해 보여도, 스캐너는 속이지 못합니다." },
   translog: { name: "송금 로그",        cat: "info",    price: 20, target: "none",     when: "morning",  desc: "오늘 밤 오간 모든 송금 기록 확인 (아침에 결과)", pitch: "돈의 흐름을 보면 사람의 속셈이 보이죠." },

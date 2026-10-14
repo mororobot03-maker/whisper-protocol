@@ -7,7 +7,7 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const { ROLES, TEAM_NAMES, OPTIONS, defaultSettings, teamPlan, rolePool, generateRoles, autoLandingDays } = require("./roles");
+const { ROLES, TEAM_NAMES, OPTIONS, defaultSettings, teamPlan, rolePool, generateRoles, citizenShortage, autoLandingDays } = require("./roles");
 const { maxHp, nightOptions, resolveNight } = require("./night");
 const {
   ITEMS, DEEPFAKE_TEMPLATES, SERVICES, SERVICE_NIGHT_LIMIT, servicePrice, AUCTION, bidStep,
@@ -114,6 +114,8 @@ function checkSettings(game) {
   const landingDays = game.settings.landingDays === "auto" ? autoLandingDays(count) : game.settings.landingDays;
   // 나올 수 있는 직업 (금지 + 인원 제한 반영)
   const pool = rolePool(bans, count);
+  const short = citizenShortage(bans, count);
+  if (short > 0) errors.push("시민을 금지하면 시민팀 직업이 " + short + "개 더 필요해요. 다른 시민팀 직업의 금지를 풀거나 시민 금지를 해제하세요.");
   return { errors, landingDays, pool, plan };
 }
 
@@ -199,6 +201,8 @@ function assignRoles(game) {
 
   // 도플갱어: 조사에 보일 가짜 시민팀 직업을 게임 시작 때 하나 정해둠 (나올 수 있는 직업 중에서)
   const fakeRoles = game.pool.filter((id) => ROLES[id].team === "citizen" && id !== "vip");
+  // 홀로그램 디코이가 조사에 보여 줄 직업: 시민이 나올 수 있으면 시민, 금지했으면 다른 시민팀 직업 (금지된 직업이 보이면 디코이가 들통남)
+  game.decoyRole = game.pool.includes("citizen") ? "citizen" : fakeRoles[Math.floor(Math.random() * fakeRoles.length)] || "citizen";
   game.disguise = {};
   for (const p of game.players) {
     if (p.role === "doppelganger") game.disguise[p.id] = fakeRoles[Math.floor(Math.random() * fakeRoles.length)];

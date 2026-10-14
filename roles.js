@@ -89,13 +89,26 @@ function generateRoles(count, bans, rand = Math.random) {
   const [lo, hi] = plan.special;
   const want = lo + Math.floor(rand() * (hi - lo + 1));
   for (let i = 0; i < want && cit.length && deck.length < count; i++) deck.push(take(cit));
-  // 나머지는 시민
-  while (deck.length < count) deck.push("citizen");
+  // 나머지는 시민. 시민을 금지했으면 남은 시민팀 특수 직업으로 채움
+  //  (그래도 모자라면 어쩔 수 없이 시민 → 로비에서 시작 전에 막아 둠: citizenShortage)
+  const citizenBanned = !pool.includes("citizen");
+  while (deck.length < count) deck.push(citizenBanned && cit.length ? take(cit) : "citizen");
   return deck;
+}
+
+// 시민을 금지했을 때 시민팀 자리를 채울 직업이 모자라면 모자란 개수 (괜찮으면 0)
+//  제3세력이 안 나오는 경우(가장 많이 필요한 경우)를 기준으로 계산
+function citizenShortage(bans, count) {
+  if (!bans.includes("citizen")) return 0;
+  const pool = rolePool(bans, count);
+  const plan = teamPlan(Math.max(count, 1));
+  const need = count - 1 - plan.syndicate; // VIP, 신디케이트를 뺀 자리
+  const have = pool.filter((id) => ROLES[id].team === "citizen" && id !== "vip" && id !== "citizen").length;
+  return Math.max(0, need - have);
 }
 
 function autoLandingDays(count) {
   return Math.min(8, Math.max(4, Math.ceil(count / 2) + 2));
 }
 
-module.exports = { ROLES, TEAM_NAMES, OPTIONS, defaultSettings, teamPlan, rolePool, generateRoles, autoLandingDays };
+module.exports = { ROLES, TEAM_NAMES, OPTIONS, defaultSettings, teamPlan, rolePool, generateRoles, citizenShortage, autoLandingDays };

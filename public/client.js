@@ -1037,7 +1037,7 @@ socket.on("lobby", (data) => {
   roleSummary.textContent =
     n + "명 기준 · VIP 1 · 신디케이트 " + plan.syndicate + " · 시민팀 특수 직업 " + special +
     (plan.third ? " · 제3세력 " + Math.round(plan.third * 100) + "% 확률" : "") +
-    " · 나머지는 시민 · 착륙 " + check.landingDays + "일차";
+    (data.settings.bans.includes("citizen") ? " · 나머지는 시민팀 특수 직업 (시민 금지)" : " · 나머지는 시민") + " · 착륙 " + check.landingDays + "일차";
 
   checkErrors.innerHTML = "";
   check.errors.forEach((msg) => checkErrors.appendChild(make("li", null, msg)));
