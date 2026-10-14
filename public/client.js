@@ -208,6 +208,30 @@ function drawOptions(options, settings, isHost) {
   optionList.innerHTML = "";
   for (const key in options) {
     const opt = options[key];
+    if (opt.onlyIf && settings.teamMode !== opt.onlyIf) continue; // 직접 설정일 때만 보이는 옵션
+    // 숫자 고르기: [−] 2명 [+]
+    if (opt.stepper) {
+      const box = make("div", "option stepper");
+      box.appendChild(make("span", null, opt.label));
+      const row = make("div", "step-row");
+      const i = opt.values.findIndex((v) => String(v) === String(settings[key]));
+      for (const [txt, d] of [["−", -1], [null, 0], ["+", 1]]) {
+        if (txt === null) {
+          row.appendChild(make("b", "step-val", settings[key] + opt.unit));
+          continue;
+        }
+        const b = make("button", "step-btn", txt);
+        b.type = "button";
+        const next = opt.values[i + d];
+        b.disabled = !isHost || next === undefined;
+        b.dataset.key = key;
+        b.dataset.value = next;
+        row.appendChild(b);
+      }
+      box.appendChild(row);
+      optionList.appendChild(box);
+      continue;
+    }
     const label = make("label", "option");
     label.appendChild(make("span", null, opt.label));
 
@@ -917,6 +941,12 @@ joinBtn.addEventListener("click", () => {
 optionList.addEventListener("change", (e) => {
   socket.emit("setOption", { key: e.target.dataset.key, value: e.target.value });
 });
+optionList.addEventListener("click", (e) => {
+  const b = e.target.closest(".step-btn");
+  if (!b || b.disabled) return;
+  sound.play("click");
+  socket.emit("setOption", { key: b.dataset.key, value: b.dataset.value });
+});
 
 // + / − 버튼도 같은 방식
 roleList.addEventListener("click", (e) => {
@@ -1035,8 +1065,8 @@ socket.on("lobby", (data) => {
   const n = data.players.length;
   const special = plan.special[0] === plan.special[1] ? plan.special[0] : plan.special[0] + "~" + plan.special[1];
   roleSummary.textContent =
-    n + "명 기준 · VIP 1 · 신디케이트 " + plan.syndicate + " · 시민팀 특수 직업 " + special +
-    (plan.third ? " · 제3세력 " + Math.round(plan.third * 100) + "% 확률" : "") +
+    n + "명 기준 · VIP 1 · 신디케이트 " + plan.syndicate +
+    (plan.custom ? " · 중립 " + plan.thirdExact + " · 시민팀 " + Math.max(0, n - plan.syndicate - plan.thirdExact) + "명 (VIP 포함, 특수 직업 " + special + ")" : " · 시민팀 특수 직업 " + special + (plan.third ? " · 제3세력 " + Math.round(plan.third * 100) + "% 확률" : "")) +
     (data.settings.bans.includes("citizen") ? " · 나머지는 시민팀 특수 직업 (시민 금지)" : " · 나머지는 시민") + " · 착륙 " + check.landingDays + "일차";
 
   checkErrors.innerHTML = "";
@@ -1370,6 +1400,13 @@ socket.on("chat", (msg) => {
   addLine(line, (mine ? "me" : "them") + " " + msg.channel);
 
   if (msg.channel === "group") mapSay(msg.from, msg.text); // 낮 그룹 채팅: 원형 지도 위 말풍선
+  // 신디케이트 채널 · 유령 채널은 메신저의 특별한 방에도 넣음 (밤 화면 왼쪽에서 바로 보이게)
+  const room = msg.channel === "syndicate" ? SYN_ROOM : msg.channel === "ghost" ? GHOST_ROOM : null;
+  if (room) {
+    (dm.threads[room] = dm.threads[room] || []).push({ from: msg.from, to: "", text: msg.text });
+    if (!(dm.open === room && dmVisible()) && !mine) dm.unread[room] = (dm.unread[room] || 0) + 1;
+    drawDM();
+  }
   sound.play(msg.channel === "wiretap" ? "whisper" : mine ? "msgOut" : "msgIn");
 });
 
@@ -1579,7 +1616,35 @@ const dm = {
   open: null,
   spectate: false,
   night: false,
+  syn: false, // 신디케이트 암호화 채널 탭을 쓸 수 있는지 (밤 · 살아있는 신디케이트)
+  ghost: false, // 유령 채널 탭 (사망자)
+  body: document.querySelector(".dm-body"),
+  home: document.querySelector(".app-dm"),
 };
+// 메신저에 같이 들어가는 특별한 방: 신디케이트 채널, 유령 채널 (보내면 "chat"으로 감)
+const SYN_ROOM = "🔒 암호화 채널";
+const GHOST_ROOM = "👻 유령 채널";
+
+// 밤 화면 배치 (넓은 화면): 왼쪽 = 세로 탭 + 1:1 대화창, 오른쪽 = 기존 앱 탭
+let nightLayout = false;
+function applyNightLayout() {
+  const on = wide.matches && screens.game.dataset.phase === "night";
+  // 메신저 탭: 밤에만, 그리고 왼쪽으로 옮겨 갔으면 숨김
+  tabs.querySelector('[data-tab="dm"]').classList.toggle("hidden", on || screens.game.dataset.phase !== "night");
+  if (on && currentTab === "dm") setTab(dm.ghost ? "info" : "action");
+  if (on === nightLayout) return;
+  nightLayout = on;
+  screens.game.classList.toggle("night-layout", on);
+  const slot = document.querySelector("#night-chat");
+  if (on) slot.appendChild(dm.body);
+  else dm.home.appendChild(dm.body);
+  slot.classList.toggle("hidden", !on);
+  drawDM();
+}
+wide.addEventListener("change", applyNightLayout);
+function dmVisible() {
+  return nightLayout || isVisible("dm");
+}
 
 function resetDM() {
   dm.threads = {};
@@ -1605,13 +1670,29 @@ function setupDM(data) {
   dm.night = data.phase === "night";
   dm.spectate = !!(data.dm && data.dm.spectate);
   dm.people = data.dm && data.dm.contacts ? data.dm.contacts : [];
-  if (dm.open && !dm.spectate && !dm.people.includes(dm.open)) dm.open = null;
+  dm.syn = dm.night && data.alive && !!data.canChat; // 밤에 아래 입력창을 쓸 수 있는 살아있는 사람 = 신디케이트
+  dm.ghost = !data.alive;
+  if (dm.open && !roomKeys().includes(dm.open)) dm.open = null;
+  if (!dm.open && dm.syn) dm.open = SYN_ROOM; // 신디케이트는 암호화 채널부터
   drawDM();
+  applyNightLayout();
+}
+
+// 지금 보여 줄 대화방 목록
+function roomKeys() {
+  const special = [...(dm.syn ? [SYN_ROOM] : []), ...(dm.ghost ? [GHOST_ROOM] : [])];
+  const rooms = Object.keys(dm.threads).filter((k) => k !== SYN_ROOM && k !== GHOST_ROOM);
+  if (dm.spectate) return [...special, ...rooms];
+  return [...special, ...new Set([...dm.people, ...rooms])];
+}
+
+function isSpecial(key) {
+  return key === SYN_ROOM || key === GHOST_ROOM;
 }
 
 function drawDM() {
   // 연락처: 살아있는 상대 전원 (+ 지난 밤 대화 상대) / 관전: 오간 대화방
-  const keys = dm.spectate ? Object.keys(dm.threads) : [...new Set([...dm.people, ...Object.keys(dm.threads)])];
+  const keys = roomKeys();
   dm.contacts.innerHTML = "";
   if (!keys.length) dm.contacts.appendChild(make("li", "dm-none", dm.spectate ? "아직 오간 대화가 없어요" : ""));
   for (const key of keys) {
@@ -1620,8 +1701,11 @@ function drawDM() {
     b.type = "button";
     b.dataset.key = key;
     const box = make("span");
-    if (dm.spectate || key.startsWith("🎧")) box.appendChild(make("span", "name", key));
-    else box.appendChild(nameTag(key, true));
+    b.title = key;
+    if (isSpecial(key) || dm.spectate || key.startsWith("🎧")) {
+      box.appendChild(make("span", "room-ico", isSpecial(key) || key.startsWith("🎧") ? [...key][0] : "👁"));
+      box.appendChild(make("span", "name", isSpecial(key) || key.startsWith("🎧") ? key.slice(2) : key));
+    } else box.appendChild(nameTag(key, true));
     const last = (dm.threads[key] || []).at(-1);
     if (last) box.appendChild(make("span", "preview", last.text));
     b.appendChild(box);
@@ -1632,15 +1716,17 @@ function drawDM() {
 
   // 대화창
   dm.log.innerHTML = "";
-  const canTalk = dm.night && !dm.spectate && dm.open && dm.people.includes(dm.open) && !dm.blocked;
-  dm.with.textContent = dm.open ? (dm.spectate ? "관전 · " + dm.open : tapRoom0() ? "도청 중 · " + dm.open.slice(3) + "의 1:1 대화" : dm.open + " 님과의 대화") : dm.spectate ? "대화방을 고르면 내용을 볼 수 있어요" : "왼쪽에서 대화할 사람을 고르세요";
+  const special = dm.open && isSpecial(dm.open);
+  const canTalk = dm.open === SYN_ROOM ? dm.syn : dm.open === GHOST_ROOM ? dm.ghost : dm.night && !dm.spectate && dm.open && dm.people.includes(dm.open) && !dm.blocked;
+  dm.with.textContent = dm.open === SYN_ROOM ? "🔒 신디케이트 암호화 채널 (동료만)" : dm.open === GHOST_ROOM ? "👻 유령 채널 (죽은 사람끼리만)" : dm.open ? (dm.spectate ? "관전 · " + dm.open : tapRoom0() ? "도청 중 · " + dm.open.slice(3) + "의 1:1 대화" : dm.open + " 님과의 대화") : dm.spectate ? "대화방을 고르면 내용을 볼 수 있어요" : "왼쪽에서 대화할 사람을 고르세요";
   const list = dm.open ? dm.threads[dm.open] || [] : [];
   if (dm.open && !list.length) dm.log.appendChild(make("li", "empty", "아직 메시지가 없어요"));
   const tapRoom = dm.open && dm.open.startsWith("🎧");
   for (const m of list) {
-    const mine = !dm.spectate && !tapRoom && (m.from === myName || m.forged);
+    const mine = special ? m.from === myName : !dm.spectate && !tapRoom && (m.from === myName || m.forged);
     const li = make("li", (mine ? "me" : "") + (m.forged ? " forged" : ""));
-    if (tapRoom) li.appendChild(make("small", null, m.from + " → " + m.to));
+    if (special && !mine) li.appendChild(make("small", null, m.from));
+    else if (tapRoom) li.appendChild(make("small", null, m.from + " → " + m.to));
     else if (dm.spectate) li.appendChild(make("small", null, m.from + (m.forged ? " (위조된 메시지)" : "")));
     else if (m.forged) li.appendChild(make("small", null, "위조 · " + m.from + " 이름으로 보냄"));
     li.appendChild(document.createTextNode(m.text));
@@ -1649,10 +1735,10 @@ function drawDM() {
   dm.log.scrollTop = dm.log.scrollHeight;
   dm.input.disabled = !canTalk;
   dm.send.disabled = !canTalk;
-  dm.input.placeholder = dm.spectate ? "관전 중에는 말할 수 없어요" : !dm.night ? "메신저는 밤에만 열려요" : dm.blocked ? "통신 차단됨 · 오늘 밤엔 보낼 수 없어요" : tapRoom0() ? "도청 중인 대화엔 끼어들 수 없어요" : dm.open ? "1:1 메시지" : "상대를 먼저 고르세요";
+  dm.input.placeholder = dm.open === GHOST_ROOM ? "죽은 사람끼리만 보여요" : dm.open === SYN_ROOM ? "동료에게만 보여요" : dm.spectate ? "관전 중에는 말할 수 없어요" : !dm.night ? "메신저는 밤에만 열려요" : dm.blocked ? "통신 차단됨 · 오늘 밤엔 보낼 수 없어요" : tapRoom0() ? "도청 중인 대화엔 끼어들 수 없어요" : dm.open ? "1:1 메시지" : "상대를 먼저 고르세요";
   dm.state.textContent = dm.spectate ? "GHOST MODE" : dm.night ? "통행금지 · 1:1만 가능" : "오프라인";
   const total = Object.values(dm.unread).reduce((a, b) => a + b, 0);
-  setDot("dm", total > 0 && !isVisible("dm"));
+  setDot("dm", total > 0 && !dmVisible());
 }
 
 dm.contacts.addEventListener("click", (e) => {
@@ -1669,7 +1755,8 @@ dm.form.addEventListener("submit", (e) => {
   e.preventDefault();
   const text = dm.input.value.trim();
   if (!text || !dm.open) return;
-  socket.emit("dm", { to: dm.open, text });
+  if (isSpecial(dm.open)) socket.emit("chat", text); // 암호화 채널 · 유령 채널은 서버가 알아서 보낼 곳을 정함
+  else socket.emit("dm", { to: dm.open, text });
   dm.input.value = "";
 });
 
@@ -1677,7 +1764,7 @@ socket.on("dm", (msg) => {
   const key = dmKey(msg);
   (dm.threads[key] = dm.threads[key] || []).push({ from: msg.from, to: msg.to, text: msg.text, forged: !!msg.forged && (dm.spectate || !msg.tap) });
   const mine = msg.fromId === socket.id || (msg.forged && !dm.spectate);
-  if (!(dm.open === key && isVisible("dm"))) dm.unread[key] = (dm.unread[key] || 0) + (mine ? 0 : 1);
+  if (!(dm.open === key && dmVisible())) dm.unread[key] = (dm.unread[key] || 0) + (mine ? 0 : 1);
   drawDM();
   sound.play(mine ? "msgOut" : "msgIn");
 });

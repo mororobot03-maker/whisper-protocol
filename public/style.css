@@ -2562,3 +2562,45 @@ body:has(.game[data-phase="night"]) {
 .seize-label { position: absolute; z-index: 6; padding: 3px 9px; border-radius: 8px; background: #1a0a04e6; border: 1px solid #f5c451; color: #ffd27a; font-size: 18px; font-weight: 800; pointer-events: none; white-space: nowrap; }
 .seize-coin { position: absolute; z-index: 5; width: 22px; height: 22px; color: #f5c451; filter: drop-shadow(0 0 6px #f5c451); pointer-events: none; }
 .seize-coin svg { width: 100%; height: 100%; }
+
+/* 로비: 진영 숫자 고르기 [−] 2명 [+] */
+.option.stepper { gap: 4px; }
+.step-row { display: flex; align-items: center; gap: 6px; }
+.step-btn { width: 36px; height: 36px; padding: 0; font-size: 18px; }
+.step-val { min-width: 44px; text-align: center; font-size: 16px; color: var(--text); }
+
+/* =====================================================
+   밤 화면 (넓은 화면): 왼쪽 = 세로 탭 + 1:1 대화창, 오른쪽 = 기존 앱 탭
+   ===================================================== */
+.night-layout .pane-chat > *:not(#night-chat) { display: none !important; }
+.night-layout .dock { display: none; }
+.night-layout .pane-chat { padding: 10px; }
+.night-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.night-chat .dm-body { flex: 1; min-height: 0; grid-template-columns: 78px 1fr; border-radius: 12px; }
+.night-chat .dm-contacts { display: flex; flex-direction: column; gap: 4px; padding: 6px 4px; }
+.night-chat .dm-contact {
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 2px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 11px;
+  text-align: center;
+}
+.night-chat .dm-contact > span:first-child { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%; min-width: 0; }
+.night-chat .dm-contact .name-tag { flex-direction: column; gap: 3px; width: 100%; }
+.night-chat .dm-contact .token.has-avatar { width: 40px; height: 40px; }
+.night-chat .dm-contact .token { width: 40px; height: 40px; font-size: 16px; }
+.night-chat .dm-contact .name { display: block; max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.night-chat .dm-contact .preview { display: none; }
+.night-chat .dm-contact.on { border-color: var(--cyan); background: #00e5ff1f; }
+.night-chat .dm-contact .unread { position: absolute; top: 3px; right: 5px; margin: 0; }
+.night-chat .room-ico { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: #ffffff10; font-size: 20px; }
+.night-chat .dm-with { padding: 12px 14px; font-size: 14px; color: var(--text); }
+.night-chat .dm-log li { font-size: 15px; max-width: 75%; }
+.night-chat .dm-form input { padding: 11px 12px; font-size: 15px; }
+.night-chat .dm-form button { padding: 10px 16px; font-size: 15px; }
+/* 메신저 탭 안(휴대폰)에서의 특별한 방 아이콘 */
+.room-ico { margin-right: 4px; }
+.dm-contact .room-ico + .name { font-size: 12px; }

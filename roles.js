@@ -38,6 +38,10 @@ const OPTIONS = {
   nightSeconds:  { label: "밤 시간",      values: [120, 150, 180, 240],    unit: "초" },
   startCredits:  { label: "시작 자금",    values: [0, 20, 30, 50],         unit: "만" },
   revealRole:    { label: "추방 시 직업", values: ["hide", "show"],        labels: { hide: "비공개", show: "공개" } },
+  // 진영 구성: 자동(인원수에 맞춤) / 직접(신디케이트 · 중립 수를 고름, 나머지는 VIP 포함 시민팀)
+  teamMode:      { label: "진영 구성",    values: ["auto", "custom"],      labels: { auto: "자동", custom: "직접 설정" } },
+  synCount:      { label: "신디케이트",   values: [1, 2, 3, 4],            unit: "명", stepper: true, onlyIf: "custom" },
+  thirdCount:    { label: "중립",         values: [0, 1, 2],               unit: "명", stepper: true, onlyIf: "custom" },
 };
 
 function defaultSettings() {
@@ -47,13 +51,25 @@ function defaultSettings() {
     nightSeconds: 150,
     startCredits: 30,
     revealRole: "hide",
+    teamMode: "auto",
+    synCount: 1,
+    thirdCount: 0,
     bans: [], // 이번 판에 나오지 않게 할 직업
   };
 }
 
 // 인원수별 팀 구성 (VIP 1명, 신디케이트 1명 이상은 항상)
 //  syndicate: 신디케이트 수 / third: 제3세력이 나올 확률 (금지하지 않은 제3세력이 있을 때) / special: 시민팀 특수 직업 수 [최소, 최대]
-function teamPlan(count) {
+//  settings.teamMode가 "custom"이면 신디케이트 수와 중립 수(thirdExact)를 방장이 정한 대로
+function teamPlan(count, settings) {
+  const auto = autoPlan(count);
+  if (settings && settings.teamMode === "custom") {
+    return { ...auto, syndicate: settings.synCount, third: 0, thirdExact: settings.thirdCount, custom: true };
+  }
+  return auto;
+}
+
+function autoPlan(count) {
   if (count <= 5) return { syndicate: 1, third: 0.5, special: [1, 2] };
   if (count <= 6) return { syndicate: 2, third: 0.5, special: [2, 3] };
   if (count <= 8) return { syndicate: 2, third: 0.5, special: [2, 3] };
@@ -71,9 +87,9 @@ function rolePool(bans, count) {
 }
 
 // 인원수에 맞춰 직업을 랜덤으로 뽑음 → 직업 id 목록 (아직 섞기 전)
-function generateRoles(count, bans, rand = Math.random) {
+function generateRoles(count, bans, rand = Math.random, settings) {
   const pool = rolePool(bans, count);
-  const plan = teamPlan(count);
+  const plan = teamPlan(count, settings);
   const take = (list) => list.splice(Math.floor(rand() * list.length), 1)[0];
   const ofTeam = (team) => pool.filter((id) => ROLES[id].team === team && !ROLES[id].auto && id !== "vip");
 
@@ -83,7 +99,9 @@ function generateRoles(count, bans, rand = Math.random) {
   for (let i = 0; i < plan.syndicate && deck.length < count; i++) deck.push(syn.length ? take(syn) : "blade");
   // 제3세력
   const third = ofTeam("third");
-  if (third.length && deck.length < count && rand() < plan.third) deck.push(take(third));
+  if (plan.custom) {
+    for (let i = 0; i < plan.thirdExact && third.length && deck.length < count; i++) deck.push(take(third));
+  } else if (third.length && deck.length < count && rand() < plan.third) deck.push(take(third));
   // 시민팀 특수 직업
   const cit = ofTeam("citizen");
   const [lo, hi] = plan.special;
@@ -98,17 +116,31 @@ function generateRoles(count, bans, rand = Math.random) {
 
 // 시민을 금지했을 때 시민팀 자리를 채울 직업이 모자라면 모자란 개수 (괜찮으면 0)
 //  제3세력이 안 나오는 경우(가장 많이 필요한 경우)를 기준으로 계산
-function citizenShortage(bans, count) {
+function citizenShortage(bans, count, settings) {
   if (!bans.includes("citizen")) return 0;
   const pool = rolePool(bans, count);
-  const plan = teamPlan(Math.max(count, 1));
-  const need = count - 1 - plan.syndicate; // VIP, 신디케이트를 뺀 자리
+  const plan = teamPlan(Math.max(count, 1), settings);
+  const need = count - 1 - plan.syndicate - (plan.thirdExact || 0); // VIP, 신디케이트, 정해진 중립을 뺀 자리
   const have = pool.filter((id) => ROLES[id].team === "citizen" && id !== "vip" && id !== "citizen").length;
   return Math.max(0, need - have);
+}
+
+// 직접 설정한 진영 구성이 이 인원에서 가능한지. 문제 있으면 문장 목록
+function teamErrors(settings, count, bans) {
+  if (settings.teamMode !== "custom") return [];
+  const errs = [];
+  const syn = settings.synCount;
+  const third = settings.thirdCount;
+  const citizenTeam = count - syn - third; // VIP 포함
+  const thirdAvail = rolePool(bans, count).filter((id) => ROLES[id].team === "third").length;
+  if (third > thirdAvail) errs.push("중립 직업이 " + thirdAvail + "개뿐이라 중립을 " + third + "명 넣을 수 없어요. (금지를 풀거나 중립 수를 줄이세요)");
+  if (citizenTeam < 1) errs.push("시민팀(VIP)이 들어갈 자리가 없어요.");
+  else if (syn >= citizenTeam) errs.push("신디케이트(" + syn + "명)가 시민팀(" + citizenTeam + "명)보다 적어야 해요.");
+  return errs;
 }
 
 function autoLandingDays(count) {
   return Math.min(8, Math.max(4, Math.ceil(count / 2) + 2));
 }
 
-module.exports = { ROLES, TEAM_NAMES, OPTIONS, defaultSettings, teamPlan, rolePool, generateRoles, citizenShortage, autoLandingDays };
+module.exports = { ROLES, TEAM_NAMES, OPTIONS, defaultSettings, teamPlan, rolePool, generateRoles, citizenShortage, teamErrors, autoLandingDays };

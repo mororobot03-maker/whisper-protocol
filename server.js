@@ -7,7 +7,7 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const { ROLES, TEAM_NAMES, OPTIONS, defaultSettings, teamPlan, rolePool, generateRoles, citizenShortage, autoLandingDays } = require("./roles");
+const { ROLES, TEAM_NAMES, OPTIONS, defaultSettings, teamPlan, rolePool, generateRoles, citizenShortage, teamErrors, autoLandingDays } = require("./roles");
 const { maxHp, nightOptions, resolveNight } = require("./night");
 const {
   ITEMS, DEEPFAKE_TEMPLATES, SERVICES, SERVICE_NIGHT_LIMIT, servicePrice, AUCTION, bidStep,
@@ -110,13 +110,26 @@ function checkSettings(game) {
   const errors = [];
   if (count < MIN_PLAYERS) errors.push("최소 " + MIN_PLAYERS + "명이 필요합니다.");
 
-  const plan = teamPlan(Math.max(count, 1));
+  const plan = teamPlan(Math.max(count, 1), game.settings);
   const landingDays = game.settings.landingDays === "auto" ? autoLandingDays(count) : game.settings.landingDays;
   // 나올 수 있는 직업 (금지 + 인원 제한 반영)
   const pool = rolePool(bans, count);
-  const short = citizenShortage(bans, count);
+  errors.push(...teamErrors(game.settings, count, bans));
+  const short = citizenShortage(bans, count, game.settings);
   if (short > 0) errors.push("시민을 금지하면 시민팀 직업이 " + short + "개 더 필요해요. 다른 시민팀 직업의 금지를 풀거나 시민 금지를 해제하세요.");
   return { errors, landingDays, pool, plan };
+}
+
+// 인원이 바뀌어 직접 설정한 진영 구성이 안 맞으면 중립 → 신디케이트 순으로 줄이고 알림
+function clampTeams(game) {
+  const st = game.settings;
+  if (st.teamMode !== "custom") return;
+  const count = game.players.length;
+  const before = st.synCount + "/" + st.thirdCount;
+  const bad = () => count - st.synCount - st.thirdCount < 1 || st.synCount >= count - st.synCount - st.thirdCount;
+  while (bad() && st.thirdCount > 0) st.thirdCount--;
+  while (bad() && st.synCount > 1) st.synCount--;
+  if (before !== st.synCount + "/" + st.thirdCount) lobbyLog(game, "인원이 바뀌어 진영 구성을 신디케이트 " + st.synCount + " · 중립 " + st.thirdCount + "명으로 줄였어요.");
 }
 
 // 로비 채팅창에 시스템 알림 (입장·퇴장·방장 변경)
@@ -180,7 +193,7 @@ function assignRoles(game) {
   const count = game.players.length;
   // 테스트용: FORCE_ROLES=vip,godfather,citizen 처럼 주면 입장 순서대로 그 직업 (인원과 개수가 같을 때만)
   const forced = (process.env.FORCE_ROLES || "").split(",").filter((id) => own(ROLES, id));
-  const deck = forced.length === count ? forced : shuffle(generateRoles(count, game.settings.bans));
+  const deck = forced.length === count ? forced : shuffle(generateRoles(count, game.settings.bans, Math.random, game.settings));
   game.pool = rolePool(game.settings.bans, count); // 이번 판에 "나올 수 있는" 직업 (모두에게 공개)
 
   game.players.forEach((p, i) => {
@@ -795,8 +808,8 @@ function startNight(game) {
   sendPhase(game, { phase: "night", title: "밤 · 통행금지", seconds }, (p) => {
     if (!p.alive) return { info: "관전 중. 메신저에서 모든 1:1 대화를 볼 수 있습니다.", dm: { spectate: true } };
     const info = p.team === "syndicate"
-      ? "암호화 채널이 열렸습니다. 공격 투표로 대상을 정하세요. 1:1 대화는 메신저 앱에서."
-      : "통행금지 시간. 능력을 쓰고, 메신저 앱으로 1:1 대화를 나누세요.";
+      ? "암호화 채널이 열렸습니다. 공격 투표로 대상을 정하세요. 동료 채널과 1:1 대화는 메신저에서."
+      : "통행금지 시간. 능력을 쓰고, 메신저로 1:1 대화를 나누세요.";
     return {
       canChat: p.team === "syndicate", // 아래 입력창 = 신디케이트 채널. 1:1 대화는 메신저 앱 안에서
       info,
@@ -1156,6 +1169,7 @@ io.on("connection", (socket) => {
     socket.data.name = name;
     socket.join("game:" + code);
     lobbyLog(game, name + " 님이 탑승했습니다." + (game.hostId === socket.id ? " (방장)" : ""));
+    clampTeams(game);
     sendLobby(game);
   });
 
@@ -1366,6 +1380,7 @@ io.on("connection", (socket) => {
 
     if (game.phase === "lobby") {
       lobbyLog(game, me.name + " 님이 내렸습니다." + (wasHost ? " 새 방장: " + findPlayer(game, game.hostId).name : ""));
+      clampTeams(game);
       return sendLobby(game);
     }
 
