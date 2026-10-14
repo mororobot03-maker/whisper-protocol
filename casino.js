@@ -16,7 +16,7 @@ const GAMES = {
   slots:     { name: "슬롯",       odds: "2개 ×1.4 · 3개 ×4.5 · 777 ×25" },
   hilo:      { name: "하이로우",   odds: "맞힐 때마다 ×1.25 → ×3.5" },
   blackjack: { name: "블랙잭",     odds: "승 ×1.6 · 블랙잭 ×2 · 무 ×1" },
-  rhythm:    { name: "리듬 채굴",  odds: "정확도에 따라 ×0.5 ~ ×1.3" },
+  rhythm:    { name: "리듬 채굴",  odds: "판돈 없음 · 정확도에 따라 0 ~ 15만", free: true },
   race:      { name: "드론 레이스", odds: "드론마다 ×1.6 ~ ×14" },
 };
 
@@ -45,7 +45,7 @@ const CARD_NAMES = { 11: "J", 12: "Q", 13: "K", 14: "A" };
 const BJ_PAY = { win: 1.6, natural: 2 };
 
 // ----- 리듬 채굴: 노트 16개, 약 9초 -----
-const RHYTHM = { notes: 16, first: 1200, last: 9200, minGap: 380, perfect: 70, good: 140, ok: 210, base: 0.5, gain: 0.8 }; // 배당 = 0.5 + 0.8 × 정확도² (0.5 ~ 1.3)
+const RHYTHM = { notes: 16, first: 1200, last: 9200, minGap: 380, perfect: 70, good: 140, ok: 210, reward: 15 }; // 무료 채굴: 보상 = 15만 × 정확도² (0 ~ 15만)
 
 // ----- 드론 레이스: 경주마다 4대의 우승 확률을 섞어서 배정 -----
 //  배당 = 1 + (0.04 + 0.5 × 질 확률) / 이길 확률  → 50% 반환을 넣으면 어느 드론이든 기대 수익 +4%
@@ -117,9 +117,14 @@ function activeView(a) {
 
 // 판돈 확인 → 통과하면 차감하고 판 수 +1
 //  반환: 오류 문장 또는 null
-function takeStake(p, s, stake) {
+//  free = true 면 판돈 없이 판 수만 +1 (리듬 채굴: 0원이어도 할 수 있음)
+function takeStake(p, s, stake, free) {
   if (s.active) return "진행 중인 게임을 먼저 끝내세요.";
   if (s.plays >= CASINO.playsPerDay) return "오늘은 " + CASINO.playsPerDay + "판을 모두 했다. 내일 다시!";
+  if (free) {
+    s.plays++;
+    return null;
+  }
   if (!Number.isInteger(stake) || stake < CASINO.minBet || stake > CASINO.maxBet) return "판돈은 " + CASINO.minBet + " ~ " + CASINO.maxBet + "만 사이로.";
   if (stake > p.credits) return "판돈이 보유 크레딧보다 많다.";
   p.credits -= stake;
@@ -295,7 +300,7 @@ function handle(p, day, msg, rand = Math.random) {
   //  서버가 노트 시각을 정해서 보내고, 화면이 누른 시각을 돌려보냄 → 서버가 채점
   if (game === "rhythm") {
     if (action === "start") {
-      const err = takeStake(p, s, stake);
+      const err = takeStake(p, s, 0, true);
       if (err) return { error: err };
       const notes = [];
       let t = RHYTHM.first;
@@ -305,7 +310,7 @@ function handle(p, day, msg, rand = Math.random) {
         t += Math.max(RHYTHM.minGap, span * (0.55 + rand() * 0.9));
       }
       const duration = notes[notes.length - 1] + 800;
-      s.active = { game, stake, notes, duration, startedAt: Date.now() };
+      s.active = { game, stake: 0, notes, duration, startedAt: Date.now() };
       return { game, action, active: activeView(s.active) };
     }
     const a = s.active;
@@ -335,8 +340,10 @@ function handle(p, day, msg, rand = Math.random) {
       // 헛손질(노트 없는 곳을 누른 것)은 개당 0.25점 감점 → 연타로 점수 올리기 방지
       const extra = Math.max(0, hits.length - used.size);
       const acc = valid ? Math.max(0, Math.min(1, (score - extra * 0.25) / a.notes.length)) : 0;
-      const mult = valid ? RHYTHM.base + RHYTHM.gain * acc * acc : 0;
-      return { game, action, done: true, acc: Math.round(acc * 100), judges, stake: a.stake, ...payout(p, a.stake, mult) };
+      // 무료 채굴: 판돈 없이 정확도만큼 벌어 감 (손해 없음 · 카지노 손익에도 넣지 않음)
+      const back = valid ? Math.round(RHYTHM.reward * acc * acc) : 0;
+      p.credits += back;
+      return { game, action, done: true, acc: Math.round(acc * 100), judges, stake: 0, mult: 0, back, gain: back };
     }
     return { error: "알 수 없는 동작" };
   }

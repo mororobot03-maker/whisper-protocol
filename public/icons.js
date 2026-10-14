@@ -64,7 +64,6 @@ const ICON_PATHS = {
   scramble: '<path d="M4 6h16M4 12h7M15 12h5M4 18h10"/><path d="M12 9l2 2-2 2M16 15l2 2-2 2"/>',
   block: '<path d="M4 5.5h16a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 3.5V16.5H4A1.5 1.5 0 0 1 2.5 15V7A1.5 1.5 0 0 1 4 5.5z"/><path d="M8.5 8.5l7 5M15.5 8.5l-7 5"/>',
   forge: '<path d="M3 6.5h12v9H3z"/><path d="M3 7l6 4.5L15 7"/><path d="M14 20l6.5-6.5-2-2L12 18v2z"/>',
-  commlog: '<rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="9" cy="9" r="1.6"/><circle cx="15" cy="9" r="1.6"/><path d="M10.6 9h2.8M8 14h8M8 17.5h5"/>',
   bankhack: '<rect x="3" y="7" width="18" height="12" rx="2"/><path d="M3 11h18"/><path d="M7 15h4"/><path d="M15 3l2 3 2-3"/><path d="M17 6v4"/>',
   speaker: '<path d="M3.5 10v4h3l7.5 4.5v-13L6.5 10h-3z"/><path d="M17.5 8.5a5 5 0 0 1 0 7M20 6a8.5 8.5 0 0 1 0 12"/><path d="M10 2.5l-2 3"/>',
   gavel: '<path d="M13.5 3.5l6 6M11 6l6 6M12.2 4.8l-4.4 4.4 6 6 4.4-4.4"/><path d="M10.5 12.5L4 19l1.5 1.5L12 14"/><path d="M13 21h8"/>',

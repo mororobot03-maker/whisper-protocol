@@ -937,6 +937,34 @@ joinBtn.addEventListener("click", () => {
   setMyName(nameInput.value.trim().slice(0, 12)); // 복도에서 내 방 표시용
 });
 
+// 로비 "게임 나가기": 실수 방지로 두 번 눌러야 나감 (3초 안에)
+const leaveBtn = document.querySelector("#leave-btn");
+let leaveArmed = null;
+function resetLeaveBtn() {
+  clearTimeout(leaveArmed);
+  leaveArmed = null;
+  leaveBtn.textContent = "게임 나가기";
+  leaveBtn.classList.remove("armed");
+}
+leaveBtn.addEventListener("click", () => {
+  sound.play("click");
+  if (!leaveArmed) {
+    leaveBtn.textContent = "정말 나갈까요? 한 번 더 누르세요";
+    leaveBtn.classList.add("armed");
+    leaveArmed = setTimeout(resetLeaveBtn, 3000);
+    return;
+  }
+  resetLeaveBtn();
+  socket.emit("leaveRoom");
+});
+// 서버가 방에서 뺐다고 알려 주면 입장 화면으로 (닉네임·방 코드·캐릭터는 그대로 남아 있음)
+socket.on("leftRoom", () => {
+  document.querySelector("#result").classList.add("hidden");
+  document.querySelector("#lobby-log").innerHTML = "";
+  show("join");
+  updateMusic();
+});
+
 // 드롭다운이 여러 개라 부모 하나에만 이벤트를 걸고, 어떤 드롭다운인지는 data-key로 구분
 optionList.addEventListener("change", (e) => {
   socket.emit("setOption", { key: e.target.dataset.key, value: e.target.value });
@@ -1518,30 +1546,113 @@ function applyMemoMarks() {
   }
 }
 
-// 음악 / 효과음 켜기·끄기 (브라우저에 기억). 같은 버튼이 입장 화면과 HUD에 하나씩 있음
+// 음악 / 효과음 (브라우저에 기억). 같은 버튼이 입장 화면과 HUD에 하나씩 있음
+//  버튼을 누르면 작은 창이 열림: 줄마다 [켜기·끄기 아이콘] [볼륨 슬라이더] [숫자%]
 const AUDIO_BTN = {
-  music: { off: () => sound.isMusicMuted(), set: (m) => sound.setMusicMuted(m), on: "music", offIcon: "musicOff", name: "음악" },
-  sfx: { off: () => sound.isMuted(), set: (m) => sound.setMuted(m), on: "soundOn", offIcon: "soundOff", name: "효과음" },
+  music: { off: () => sound.isMusicMuted(), set: (m) => sound.setMusicMuted(m), vol: () => sound.musicVolume(), setVol: (v) => sound.setMusicVolume(v), on: "music", offIcon: "musicOff", name: "음악" },
+  sfx: { off: () => sound.isMuted(), set: (m) => sound.setMuted(m), vol: () => sound.sfxVolume(), setVol: (v) => sound.setSfxVolume(v), on: "soundOn", offIcon: "soundOff", name: "효과음" },
 };
+// 슬라이더가 0이면 꺼진 것처럼 보이게
+const audioOff = (kind) => kind.off() || kind.vol() <= 0;
+
 function drawSoundBtns() {
   for (const btn of document.querySelectorAll("[data-audio]")) {
     const kind = AUDIO_BTN[btn.dataset.audio];
-    const off = kind.off();
+    const off = audioOff(kind);
     btn.innerHTML = "";
     btn.appendChild(icon(off ? kind.offIcon : kind.on));
     btn.classList.toggle("off", off);
-    btn.setAttribute("aria-label", kind.name + (off ? " 켜기" : " 끄기"));
-    btn.title = kind.name + (off ? " 켜기" : " 끄기");
+    btn.setAttribute("aria-label", "소리 설정 (" + kind.name + ")");
+    btn.title = "소리 설정";
+  }
+  drawVolumePanel();
+}
+
+const volPanel = make("div", "vol-panel hidden");
+volPanel.setAttribute("role", "dialog");
+volPanel.setAttribute("aria-label", "소리 설정");
+document.body.appendChild(volPanel);
+for (const key in AUDIO_BTN) {
+  const kind = AUDIO_BTN[key];
+  const row = make("div", "vol-row");
+  row.dataset.kind = key;
+  const toggle = make("button", "vol-toggle");
+  toggle.type = "button";
+  const label = make("span", "vol-name", kind.name);
+  const range = make("input", "vol-range");
+  range.type = "range";
+  range.min = 0;
+  range.max = 100;
+  range.step = 5;
+  range.setAttribute("aria-label", kind.name + " 볼륨");
+  const num = make("span", "vol-num");
+  toggle.addEventListener("click", () => {
+    if (audioOff(kind)) {
+      kind.set(false); // 켜기
+      if (kind.vol() <= 0) kind.setVol(0.5); // 슬라이더가 0이었으면 절반 크기로
+    } else kind.set(true); // 끄기 (슬라이더 위치는 그대로 기억)
+    drawSoundBtns();
+    sound.play("click");
+  });
+  range.addEventListener("input", () => {
+    kind.setVol(Number(range.value) / 100);
+    if (kind.off() && Number(range.value) > 0) kind.set(false); // 슬라이더를 올리면 자동으로 켜짐
+    drawSoundBtns();
+  });
+  range.addEventListener("change", () => key === "sfx" && sound.play("click"));
+  row.append(toggle, label, range, num);
+  volPanel.appendChild(row);
+}
+
+function drawVolumePanel() {
+  for (const row of volPanel.querySelectorAll(".vol-row")) {
+    const kind = AUDIO_BTN[row.dataset.kind];
+    const off = audioOff(kind);
+    const toggle = row.querySelector(".vol-toggle");
+    toggle.innerHTML = "";
+    toggle.appendChild(icon(off ? kind.offIcon : kind.on));
+    toggle.classList.toggle("off", off);
+    toggle.setAttribute("aria-label", kind.name + (kind.off() ? " 켜기" : " 끄기"));
+    const pct = Math.round(kind.vol() * 100);
+    const range = row.querySelector(".vol-range");
+    if (document.activeElement !== range) range.value = pct;
+    range.style.setProperty("--pct", pct + "%");
+    range.classList.toggle("off", kind.off());
+    row.querySelector(".vol-num").textContent = kind.off() ? "끔" : pct + "%";
   }
 }
+
+// 누른 버튼 바로 아래에 창을 띄움 (화면 밖으로 안 나가게)
+function openVolumePanel(btn) {
+  volPanel.classList.remove("hidden");
+  drawVolumePanel();
+  const r = btn.getBoundingClientRect();
+  const w = volPanel.offsetWidth;
+  const left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w));
+  volPanel.style.left = left + "px";
+  volPanel.style.top = r.bottom + 8 + "px";
+}
+let volFrom = null; // 창을 연 버튼
+function closeVolumePanel() {
+  volPanel.classList.add("hidden");
+}
+
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-audio]");
-  if (!btn) return;
-  const kind = AUDIO_BTN[btn.dataset.audio];
-  kind.set(!kind.off());
-  drawSoundBtns();
-  sound.play("click");
+  if (btn) {
+    sound.play("click");
+    // 같은 버튼을 한 번 더 누르면 닫힘
+    if (!volPanel.classList.contains("hidden") && volFrom === btn) closeVolumePanel();
+    else {
+      volFrom = btn;
+      openVolumePanel(btn);
+    }
+    return;
+  }
+  if (!e.target.closest(".vol-panel")) closeVolumePanel(); // 바깥을 누르면 닫힘
 });
+document.addEventListener("keydown", (e) => e.key === "Escape" && closeVolumePanel());
+window.addEventListener("resize", closeVolumePanel);
 drawSoundBtns();
 
 // 지금 어떤 배경음악이 나와야 하는지: 화면 + 게임 단계 + (밤이면) 열린 탭

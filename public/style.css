@@ -268,6 +268,9 @@ main:has(#game-screen:not(.hidden)) h1 { display: none; }
 @keyframes heal {
   50% { background: #0f3f2a; box-shadow: 0 0 14px #3dffa2; border-color: #3dffa2; }
 }
+@keyframes guard {
+  20%, 60% { background: #0c2a3a; box-shadow: 0 0 18px #2ff4ff, inset 0 0 12px #2ff4ff66; border-color: #2ff4ff; }
+}
 @keyframes airlock {
   50% { background: #ff4d6d; border-color: #ff4d6d; }
 }
@@ -1061,6 +1064,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 }
 .mroom.fx-hit { animation: hit 0.6s; }
 .mroom.fx-heal { animation: heal 0.9s; }
+.mroom.fx-guard { animation: guard 1.4s; }
 .mroom.breach { animation: airlock 0.3s infinite; border-color: var(--syndicate); }
 
 /* 처형 경고등 */
@@ -1746,6 +1750,69 @@ body:has(#lobby-screen:not(.hidden)) {
 }
 body:has(#game-screen:not(.hidden)) .corner-audio { display: none; }
 .hud-top .sound-btn + .sound-btn { margin-left: -4px; }
+
+/* 소리 설정 창: 소리 버튼을 누르면 바로 아래에 뜸 */
+.vol-panel {
+  position: fixed;
+  z-index: 300;
+  width: 250px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+  border-radius: 12px;
+  border: 1px solid #2ff4ff40;
+  background: #121224f2;
+  box-shadow: 0 10px 30px #000a, 0 0 0 1px #000;
+}
+.vol-row {
+  display: grid;
+  grid-template-columns: 30px 44px 1fr 34px;
+  align-items: center;
+  gap: 6px;
+}
+.vol-toggle {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid #ffffff26;
+  background: #ffffff0a;
+  color: var(--cyan);
+  font-size: 16px;
+}
+.vol-toggle.off { color: var(--dim); }
+.vol-name { font-size: 12px; color: var(--dim); }
+.vol-num { font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.vol-range {
+  width: 100%;
+  height: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--cyan) var(--pct, 100%), #ffffff1f var(--pct, 100%));
+  cursor: pointer;
+}
+.vol-range.off { filter: grayscale(1) brightness(0.6); }
+.vol-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+  background: var(--text);
+}
+.vol-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+  background: var(--text);
+}
 
 /* =====================================================
    카지노: 채굴 미션
@@ -2552,6 +2619,9 @@ body:has(.game[data-phase="night"]) {
 @keyframes jam-scan { 0% { background-position: 0 0, 0 0; } 100% { background-position: 0 12px, 30px 0; } }
 .mwalker.glitch svg { animation: glitch-fig 0.12s steps(2) infinite; filter: drop-shadow(3px 0 #ff2fd1) drop-shadow(-3px 0 #2ff4ff); }
 @keyframes glitch-fig { 0% { transform: translateX(-3px) skewX(10deg); opacity: 0.9; } 100% { transform: translateX(3px) skewX(-10deg); opacity: 0.5; } }
+.fx-icon.guard-shield { width: 52px; height: 52px; color: #2ff4ff; filter: drop-shadow(0 0 14px #2ff4ff); }
+.guard-label { position: absolute; z-index: 6; padding: 3px 8px; border-radius: 6px; background: #04141ccc; border: 1px solid #2ff4ff; color: #aef9ff; font-weight: 800; font-size: 14px; letter-spacing: 2px; pointer-events: none; white-space: nowrap; }
+.guard-spark { position: absolute; z-index: 5; width: 6px; height: 6px; border-radius: 50%; background: #fff7c2; box-shadow: 0 0 8px #ffd84d; pointer-events: none; }
 .jam-label { position: absolute; z-index: 6; padding: 3px 8px; border-radius: 6px; background: #12060acc; border: 1px solid #ff2fd1; color: #ff9be8; font-weight: 800; font-size: 14px; letter-spacing: 2px; pointer-events: none; white-space: nowrap; }
 
 /* 사망자 전용 유령 채널 */
@@ -2604,3 +2674,16 @@ body:has(.game[data-phase="night"]) {
 /* 메신저 탭 안(휴대폰)에서의 특별한 방 아이콘 */
 .room-ico { margin-right: 4px; }
 .dm-contact .room-ico + .name { font-size: 12px; }
+
+/* 로비: 게임 나가기 (두 번 눌러야 나감) */
+.leave-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  font-size: 13px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid #ffffff22;
+}
+.leave-btn:hover { color: var(--syndicate); border-color: #ff4d6d66; }
+.leave-btn.armed { color: #fff; background: #ff4d6d33; border-color: var(--syndicate); }

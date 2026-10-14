@@ -17,13 +17,12 @@ const ITEMS = {
   scramble: { name: "채팅 교란",        cat: "hack",    price: 20, target: "player",   when: "now",      desc: "대상이 오늘 밤 보내는 1:1 메시지의 글자 일부가 깨져서 전달됨", pitch: "중요한 말일수록 엉망이 되겠죠." },
   block:    { name: "통신 차단",        cat: "hack",    price: 30, target: "player",   when: "now",      desc: "대상은 오늘 밤 남은 시간 동안 1:1 메시지를 보낼 수 없음", pitch: "오늘 밤, 그 사람의 입을 막아 드립니다." },
   forge:    { name: "메시지 위조",      cat: "hack",    price: 40, target: "forge",    when: "now",      desc: "다른 사람 이름으로 원하는 상대에게 1:1 메시지 1통 발송", pitch: "남의 이름으로 한마디. 믿을지는 받는 사람 몫이죠." },
-  commlog:  { name: "통신 기록 열람",   cat: "hack",    price: 20, target: "player",   when: "morning",  desc: "대상이 오늘 밤 누구와 대화했는지 목록 확인 (내용은 못 봄 · 아침에 결과)", pitch: "무슨 말을 했는지는 몰라도, 누구와 했는지는 알 수 있습니다." },
   bankhack: { name: "계좌 해킹",        cat: "hack",    price: 30, target: "player",   when: "morning",  desc: "대상 크레딧의 절반을 빼 옴 (최대 50만 · 아침에 처리 · 방화벽에 막힘). 털린 사람은 누가 했는지 모름", pitch: "남의 지갑이 곧 당신의 지갑. 단, 방화벽은 조심하시길." },
   speaker:  { name: "선내 스피커 해킹", cat: "hack",    price: 40, target: "text",     when: "morning",  desc: "내일 아침 방송에 출처 불명 메시지 1줄을 모두에게 송출", pitch: "내일 아침, 배 전체가 당신의 목소리를 듣게 됩니다. 물론 익명으로." },
   // ----- 방어 -----
   armor:    { name: "피하 장갑",        cat: "defense", price: 30, target: "none",     when: "tonight",  desc: "오늘 밤 받는 피해 1 무효", pitch: "칼날 한 번쯤은 거뜬히 막아내는 인공 피부입니다." },
   proxy:    { name: "프록시",           cat: "defense", price: 30, target: "none",     when: "tonight",  desc: "오늘 밤 나를 향한 능력·지목이 다른 랜덤 1명에게 튕겨 나감", pitch: "누가 당신을 노리든, 엉뚱한 사람에게 가게 됩니다." },
-  firewall: { name: "방화벽",           cat: "defense", price: 20, target: "none",     when: "tonight",  desc: "오늘 밤 넷러너·화이트햇·인포브로커와 채팅 해킹(도청·교란·차단·위조·기록 열람)과 계좌 해킹을 차단", pitch: "해커들에게는 악몽 같은 물건이죠." },
+  firewall: { name: "방화벽",           cat: "defense", price: 20, target: "none",     when: "tonight",  desc: "오늘 밤 넷러너·화이트햇·인포브로커와 채팅 해킹(도청·교란·차단·위조)과 계좌 해킹을 차단", pitch: "해커들에게는 악몽 같은 물건이죠." },
   decoy:    { name: "홀로그램 디코이",  cat: "defense", price: 20, target: "none",     when: "tonight",  desc: "오늘 밤 나에 대한 조사가 \"시민\"으로 나옴 (시민을 금지한 판이면 다른 시민팀 직업)", pitch: "조사관 눈에는 평범한 승객으로 보일 겁니다." },
   // ----- 정보·기타 -----
   scanner:  { name: "생체 스캐너",      cat: "info",    price: 20, target: "player",   when: "morning",  desc: "대상의 정확한 남은 체력 확인 (아침에 결과)", pitch: "겉으론 멀쩡해 보여도, 스캐너는 속이지 못합니다." },

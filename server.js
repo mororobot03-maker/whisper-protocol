@@ -623,10 +623,7 @@ function applyItem(game, p, id, payload) {
   else if (id === "miner") p.miner += MINER_TURNS;
   else if (id === "deepfake") night.deepfake = { kind: payload.kind, target: payload.target };
   else if (id === "speaker") night.speaker.push(payload.text);
-  else if (id === "commlog") {
-    if (hackBlocked(game, p, t, item.name)) return;
-    night.commlogs.push({ by: p.id, target: t.id });
-  } else if (id === "bankhack") {
+  else if (id === "bankhack") {
     if (hackBlocked(game, p, t, item.name)) return;
     night.bankhacks.push({ by: p.id, target: t.id });
   } else if (id === "wiretap") {
@@ -794,7 +791,6 @@ function startNight(game) {
     dms: [], // 1:1 메신저 기록 { from, to, text, forged } (사망자 관전 · 도청 · 통신 기록용)
     hacks: emptyHacks(), // 채팅 도청 · 교란 · 차단
     inventory: [], // 대상을 아직 안 고른 낙찰품 { uid, owner, id }
-    commlogs: [], // 통신 기록 열람 { by, target }
     speaker: [], // 선내 스피커 해킹 문장 (내일 아침 방송)
     svcCount: {}, // 오늘 밤 다크넷 이용 수 { id: n }
     bankhacks: [], // 계좌 해킹 { by, target } (아침에 처리)
@@ -836,17 +832,6 @@ function startMorning(game) {
   const night = resolveNight(game);
   const tell = (id, text) => (night.priv[id] = night.priv[id] || []).push(text);
 
-  // 통신 기록 열람: 대상이 밤새 대화한 상대 (위조 메시지는 대상이 보낸 게 아니라 빠짐)
-  for (const c of game.night.commlogs) {
-    const t = findPlayer(game, c.target);
-    const partners = new Set();
-    for (const m of game.night.dms) {
-      if (m.forged) continue;
-      if (m.from === t.name) partners.add(m.to);
-      if (m.to === t.name) partners.add(m.from);
-    }
-    tell(c.by, "통신 기록: " + t.name + "이(가) 어젯밤 대화한 사람 → " + (partners.size ? [...partners].join(", ") : "아무도 없음"));
-  }
   // 계좌 해킹: 대상 크레딧의 절반 (최대 50만). 털린 사람은 누가 했는지 모름
   for (const h of game.night.bankhacks) {
     const thief = findPlayer(game, h.by);
@@ -1353,7 +1338,21 @@ io.on("connection", (socket) => {
   });
 
   // 접속 끊김
-  on("disconnect", () => {
+  // 로비에서 "게임 나가기": 방에서 빠지고 입장 화면으로 (게임 중에는 불가)
+  on("leaveRoom", () => {
+    const game = games[socket.data.code];
+    if (!game || game.phase !== "lobby") return;
+    leaveGame();
+    socket.leave("game:" + game.code);
+    socket.data.code = null;
+    socket.data.name = null;
+    socket.emit("leftRoom");
+  });
+
+  on("disconnect", leaveGame);
+
+  // 방에서 빠짐 (창을 닫거나, 로비에서 나가기를 눌렀을 때)
+  function leaveGame() {
     const game = games[socket.data.code];
     if (!game) return;
 
@@ -1388,7 +1387,7 @@ io.on("connection", (socket) => {
     if (game.phase === "over") return;
     if (endIfWinner(game)) return; // 나간 사람이 VIP나 마지막 신디케이트였다면 바로 판정
     checkAllVoted(game); // 투표 중에 나갔으면 남은 사람이 다 찍었는지 다시 확인
-  });
+  }
 });
 
 // 최후의 안전장치: 놓친 오류가 있어도 서버 전체(모든 방)가 꺼지지 않게 기록만 남김

@@ -58,7 +58,8 @@ function drawBetBar() {
   cas.range.max = Math.max(1, max);
   cas.range.value = cas.bet;
   cas.view.textContent = cas.bet;
-  const off = cas.busy || max < 1 || !!(cas.state && cas.state.active);
+  const free = !!(cas.state && cas.state.games[cas.game]?.free); // 리듬 채굴은 판돈이 없음
+  const off = free || cas.busy || max < 1 || !!(cas.state && cas.state.active);
   for (const el of [cas.range, cas.minus, cas.plus, ...cas.quick.querySelectorAll("button")]) el.disabled = off;
 }
 
@@ -106,6 +107,7 @@ cas.games.addEventListener("click", (e) => {
   cas.game = b.dataset.game;
   sound.play("tab");
   cas.result.textContent = "";
+  drawBetBar();
   drawGames();
   drawTable();
 });
@@ -117,10 +119,10 @@ function noPlays() {
   return !cas.state || cas.state.playsLeft <= 0;
 }
 
-function playBtn(label, onClick, extraDisabled) {
+function playBtn(label, onClick, extraDisabled, free) {
   const b = make("button", "primary cas-play", label);
   b.type = "button";
-  b.disabled = cas.busy || noPlays() || maxStake() < 1 || !!extraDisabled;
+  b.disabled = cas.busy || noPlays() || (!free && maxStake() < 1) || !!extraDisabled;
   b.addEventListener("click", onClick);
   return b;
 }
@@ -368,8 +370,8 @@ function drawRhythm() {
   tap.addEventListener("pointerdown", (e) => { e.preventDefault(); rhythmHit(); });
   cas.table.appendChild(tap);
   if (!cas.rhythm) {
-    cas.table.appendChild(make("p", "cas-odds", "내려오는 블록이 선에 닿을 때 누르세요. 16개 · 약 10초. 정확도에 따라 ×0.5 ~ ×1.3 (80% 이상이면 이득, 헛손질은 감점)."));
-    cas.table.appendChild(playBtn("채굴 시작 · " + cas.bet + "만", () => send({ game: "rhythm", stake: cas.bet })));
+    cas.table.appendChild(make("p", "cas-odds", "내려오는 블록이 선에 닿을 때 누르세요. 16개 · 약 10초. 판돈 없이 정확도에 따라 0 ~ 15만을 캡니다 (돈이 없어도 OK · 하루 판 수에 포함 · 헛손질은 감점)."));
+    cas.table.appendChild(playBtn("무료 채굴 시작", () => send({ game: "rhythm" }), false, true));
   }
 }
 
@@ -563,13 +565,13 @@ socket.on("casinoResult", async (r) => {
     cas.state.active = null;
     const name = cas.state.games[r.game].name;
     let text;
-    if (r.game === "rhythm") text = "정확도 " + r.acc + "% · ×" + r.mult;
+    if (r.game === "rhythm") text = "정확도 " + r.acc + "% · 채굴";
     else if (r.game === "blackjack") text = { natural: "블랙잭!", win: "승리!", push: "무승부", lose: "딜러 승", bust: "버스트 (21 초과)" }[r.result] + " ×" + r.mult;
     else if (r.game === "roulette") text = r.n + (r.color === "red" ? " 빨강" : r.color === "black" ? " 검정" : " 초록") + " · " + (r.win ? "적중! ×" + r.mult : "빗나감");
     else if (r.game === "race") text = r.order[0] + " 우승 · " + (r.win ? "적중! ×" + r.mult : "빗나감");
     else if (r.game === "hilo") text = r.mult > 0 ? "수령 ×" + r.mult : "틀렸다";
     else text = r.win ? "당첨! ×" + r.mult : "꽝";
-    const money = r.gain > 0 ? "+" + r.gain + "만" : r.gain < 0 ? "−" + -r.gain + "만 (내일 절반 반환)" : "본전";
+    const money = r.gain > 0 ? "+" + r.gain + "만" : r.gain < 0 ? "−" + -r.gain + "만 (내일 절반 반환)" : r.game === "rhythm" ? "0만" : "본전";
     cas.result.textContent = text + " → " + money;
     cas.result.className = "cas-result " + (r.gain > 0 ? "win" : "lose");
     sound.play(r.gain > 0 ? "win" : "lose");

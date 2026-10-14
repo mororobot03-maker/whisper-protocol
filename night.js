@@ -142,7 +142,7 @@ function investigate(game, t, rand = Math.random) {
 function resolveNight(game, rand = Math.random) {
   const night = game.night;
   const find = (id) => game.players.find((p) => p.id === id);
-  const events = []; // 공개 발표할 사건 { type: injured|dead|healed, name, text } (화면 애니메이션용)
+  const events = []; // 공개 발표할 사건 { type: injured|dead|healed|guarded|jammed, name, text } (화면 애니메이션용)
   const priv = {};
   const tell = (p, text) => (priv[p.id] = priv[p.id] || []).push(text);
   const pick = (arr) => arr[Math.floor(rand() * arr.length)];
@@ -280,6 +280,13 @@ function resolveNight(game, rand = Math.random) {
 
   // 경호: 경호원이 지키는 사람을 노린 공격은 막힘 (경호원도 다치지 않음)
   let guardPaid = false;
+  // 막힌 공격은 CCTV에 공개 (어느 방이 노려졌는지 보임 · 누가 막았는지는 안 보임)
+  const guardedShown = new Set();
+  const guarded = (t) => {
+    if (guardedShown.has(t.id)) return;
+    guardedShown.add(t.id);
+    events.push({ type: "guarded", name: t.name, text: t.name + "을(를) 노린 공격이 막혔다!" });
+  };
   const strike = (t) => {
     if (works(guard) && guard.target === t) {
       if (!guardPaid) {
@@ -287,10 +294,12 @@ function resolveNight(game, rand = Math.random) {
         guardPaid = true;
       }
       tell(guard.actor, t.name + "을(를) 노린 공격을 막아냈다. 경호 보수 +" + BODYGUARD_REWARD + "만");
+      guarded(t);
       return;
     }
     if (mercGuard && mercGuard.target === t) {
       tell(mercGuard.actor, t.name + "을(를) 노린 공격을 막아냈다.");
+      guarded(t);
       return;
     }
     hit(t);
@@ -328,6 +337,7 @@ function resolveNight(game, rand = Math.random) {
     if (dmg[id] > 0 && hasFx(game, t, "armor")) {
       dmg[id]--;
       tell(t, "피하 장갑이 공격 1회를 막아냈다.");
+      guarded(t);
     }
   }
 

@@ -15,13 +15,22 @@ const sound = (() => {
 
   let muted = false;
   let musicMuted = false;
+  // 볼륨 슬라이더 값 (0 ~ 1). 1이면 원래 크기
+  let sfxLevel = 1;
+  let musicLevel = 1;
+  const level = (v) => (v === null || v === "" || !Number.isFinite(Number(v)) ? 1 : Math.max(0, Math.min(1, Number(v))));
   try {
     muted = localStorage.getItem("wp-mute") === "1";
     musicMuted = localStorage.getItem("wp-music-mute") === "1";
+    sfxLevel = level(localStorage.getItem("wp-sfx-vol"));
+    musicLevel = level(localStorage.getItem("wp-music-vol"));
   } catch (e) {}
   const VOLUME = 0.35;
   const MUSIC_VOLUME = 0.32; // 배경음악은 효과음보다 작게
   let musicBus = null; // 배경음악 전체 볼륨 (효과음과 따로 끄고 켬)
+  // 실제로 손잡이에 넣을 값 = 기본 크기 × 슬라이더 (꺼져 있으면 0)
+  const sfxGain = () => (muted ? 0 : VOLUME * sfxLevel);
+  const musicGain = () => (musicMuted ? 0 : MUSIC_VOLUME * musicLevel);
 
   function ensure() {
     if (!ctx) {
@@ -29,10 +38,10 @@ const sound = (() => {
       if (!AC) return null;
       ctx = new AC();
       master = ctx.createGain();
-      master.gain.value = muted ? 0 : VOLUME;
+      master.gain.value = sfxGain();
       master.connect(ctx.destination);
       musicBus = ctx.createGain();
-      musicBus.gain.value = musicMuted ? 0 : MUSIC_VOLUME;
+      musicBus.gain.value = musicGain();
       musicBus.connect(ctx.destination);
       // 1초짜리 잡음을 한 번 만들어 두고 계속 재사용
       noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
@@ -153,6 +162,12 @@ const sound = (() => {
     // 아침 사건
     step: (t) => noise(t, 0.05, { vol: 0.08, freq: 600, q: 2 }),
     slash: (t) => { noise(t, 0.18, { vol: 0.3, freq: 5000, to: 800, q: 1.5 }); tone(t + 0.05, 160, 0.2, { type: "sawtooth", vol: 0.12, to: 60 }); },
+    guard: (t) => { // 방패에 튕겨 나감: 쨍! 하는 쇳소리
+      noise(t, 0.06, { vol: 0.3, freq: 2500, q: 3 });
+      tone(t, 1250, 0.5, { type: "triangle", vol: 0.16, to: 1180 });
+      tone(t, 1870, 0.35, { type: "sine", vol: 0.08 });
+      tone(t + 0.02, 520, 0.18, { type: "square", vol: 0.06, to: 380 });
+    },
     heal: (t) => melody(t, [[N.C5, 0.07], [N.E5, 0.07], [N.G5, 0.07], [N.C6, 0.07], [N.E6, 0.25]], { type: "triangle", vol: 0.12 }),
     down: (t) => { tone(t, 300, 0.6, { type: "triangle", vol: 0.18, to: 60 }); },
     alarm: (t) => { // 처형: 사이렌 3번
@@ -276,30 +291,49 @@ const sound = (() => {
     else fadeOutCurrent();
   }
 
+  function save(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {}
+  }
+
+  // 배경음악 손잡이를 부드럽게 돌림 (툭 끊기지 않게)
+  function applyMusic(sec) {
+    if (!musicBus) return;
+    const t = ctx.currentTime;
+    musicBus.gain.cancelScheduledValues(t);
+    musicBus.gain.setValueAtTime(musicBus.gain.value, t);
+    musicBus.gain.linearRampToValueAtTime(musicGain(), t + sec);
+  }
+
   function setMusicMuted(m) {
     musicMuted = m;
-    try {
-      localStorage.setItem("wp-music-mute", m ? "1" : "0");
-    } catch (e) {}
-    if (musicBus) {
-      const t = ctx.currentTime;
-      musicBus.gain.cancelScheduledValues(t);
-      musicBus.gain.setValueAtTime(musicBus.gain.value, t);
-      musicBus.gain.linearRampToValueAtTime(m ? 0 : MUSIC_VOLUME, t + 0.3);
-    }
+    save("wp-music-mute", m ? "1" : "0");
+    applyMusic(0.3);
   }
 
   function setMuted(m) {
     muted = m;
-    try {
-      localStorage.setItem("wp-mute", m ? "1" : "0");
-    } catch (e) {}
-    if (master) master.gain.value = m ? 0 : VOLUME;
+    save("wp-mute", m ? "1" : "0");
+    if (master) master.gain.value = sfxGain();
+  }
+
+  // 볼륨 슬라이더 (0 ~ 1)
+  function setMusicVolume(v) {
+    musicLevel = level(v);
+    save("wp-music-vol", String(musicLevel));
+    applyMusic(0.08);
+  }
+  function setSfxVolume(v) {
+    sfxLevel = level(v);
+    save("wp-sfx-vol", String(sfxLevel));
+    if (master) master.gain.value = sfxGain();
   }
 
   return {
     play, spin, setMuted, isMuted: () => muted,
     music, setMusicMuted, isMusicMuted: () => musicMuted,
+    setMusicVolume, setSfxVolume, musicVolume: () => musicLevel, sfxVolume: () => sfxLevel,
     nowPlaying: () => (current ? current.name : null),
   };
 })();

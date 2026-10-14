@@ -519,6 +519,33 @@ async function playEvent(item) {
       { transform: "translate(-50%,-50%) scale(1)", opacity: 0 },
     ], 1100).catch(() => {});
     map.fx.lastChild?.appendChild(icon("shield"));
+  } else if (item.type === "guarded") {
+    // 막힘: 방 앞에 큰 방패가 펼쳐지고 칼날이 튕겨 나감 (누가 막았는지는 안 보임)
+    room.classList.remove("fx-hit");
+    room.classList.add("fx-guard");
+    sound.play("guard");
+    caption("방어!", "good");
+    burst("fx-icon shield guard-shield", "", at, [
+      { transform: "translate(-50%,-50%) scale(0.2)", opacity: 0 },
+      { transform: "translate(-50%,-50%) scale(1.6)", opacity: 1, offset: 0.25 },
+      { transform: "translate(-50%,-50%) scale(1.4)", opacity: 1, offset: 0.75 },
+      { transform: "translate(-50%,-50%) scale(1.2)", opacity: 0 },
+    ], 1700).catch(() => {});
+    map.fx.lastChild?.appendChild(icon("shield"));
+    burst("guard-label", "BLOCKED", { x: at.x, y: at.y - 44 }, [
+      { transform: "translate(-50%,-50%) scale(1.5)", opacity: 0 },
+      { transform: "translate(-50%,-50%) scale(1)", opacity: 1, offset: 0.2 },
+      { transform: "translate(-50%,-50%) scale(1)", opacity: 1, offset: 0.8 },
+      { transform: "translate(-50%,-70%) scale(0.95)", opacity: 0 },
+    ], 1700).catch(() => {});
+    // 튕겨 나간 불꽃
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI * 2 * i) / 6 + Math.random() * 0.5;
+      burst("guard-spark", "", at, [
+        { transform: "translate(-50%,-50%) scale(1)", opacity: 1 },
+        { transform: "translate(calc(-50% + " + Math.cos(a) * 46 + "px), calc(-50% + " + Math.sin(a) * 46 + "px)) scale(0.3)", opacity: 0 },
+      ], 600).catch(() => {});
+    }
   } else if (item.type === "injured") {
     burst("fx-icon crack", "", at, [
       { transform: "translate(-50%,-60%) scale(0.4)", opacity: 0 },
@@ -539,15 +566,15 @@ async function playEvent(item) {
     setDead(item.name, true);
     sound.play("down");
   }
-  await sleep(item.type === "dead" ? 1300 : 1000);
+  await sleep(item.type === "dead" ? 1300 : item.type === "guarded" ? 1500 : 1000);
 
   // 4) 결과
   camHead("기록");
-  caption(item.text, healing ? "good" : "bad");
+  caption(item.text, healing || item.type === "guarded" ? "good" : "bad");
   await goBack();
   await sleep(600);
   map.el.classList.remove("death-flash");
-  room.classList.remove("fx-hit", "fx-heal");
+  room.classList.remove("fx-hit", "fx-heal", "fx-guard");
 }
 
 // =====================================================
