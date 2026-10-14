@@ -1248,7 +1248,7 @@ function phaseCard(data) {
   } else if (data.phase === "day") {
     showPhaseCard(data.day + "일차 낮", data.alive ? "카지노 · 그룹 채팅" + (data.voteToday ? " · 끝나면 투표" : "") : "관전 중", "talk");
   } else if (data.phase === "vote") {
-    showPhaseCard("투표", data.canVote ? "비행선 밖으로 던질 사람을 고르세요" : "관전 중", "vote");
+    showPhaseCard("투표", data.canVote ? "최다 득표자: 피해 1 + 전 재산 몰수" : "관전 중", "vote");
   } else {
     return false;
   }
@@ -1289,10 +1289,14 @@ socket.on("phase", (data) => {
   drawVote(data);
   phaseInfo.textContent = data.info || "";
 
-  // 채팅 칸: 말할 수 있는 단계에서만 열림
+  // 채팅 칸: 말할 수 있는 단계에서만 열림. 사망자는 언제나 유령 채널(죽은 사람끼리만)
+  const ghost = !data.alive && data.phase !== "intro" && data.phase !== "over";
+  if (ghost) data.canChat = true;
   chatInput.disabled = !data.canChat;
   sendBtn.disabled = !data.canChat; // 말할 수 없을 땐 전송 버튼도 회색
-  chatInput.placeholder = data.canChat
+  chatInput.placeholder = ghost
+    ? "[유령] 죽은 사람끼리만 보여요"
+    : data.canChat
     ? data.phase === "night" ? "신디케이트 암호화 채널" : "그룹 채팅 · 모두에게"
     : data.phase === "night" && data.alive ? "밤에는 메신저 앱으로 1:1 대화" : "지금은 말할 수 없습니다";
   if (data.canChat) chatInput.focus();
@@ -1319,7 +1323,7 @@ socket.on("phase", (data) => {
   } else if (data.phase === "vote") {
     showStage("vote", {
       title: "투표",
-      hint: data.canVote ? "비행선 밖으로 던질 사람의 방을 누르세요" : "투표가 진행 중입니다",
+      hint: data.canVote ? "처벌할 사람의 방을 누르세요 (피해 1 + 전 재산 몰수)" : "투표가 진행 중입니다",
       candidates: data.canVote ? data.candidates : [],
     });
   } else if (data.phase === "result") {
@@ -1353,7 +1357,7 @@ socket.on("voted", (name) => {
   setVotePick(name); // 지도에도 표시
 });
 
-const CHANNEL_TAG = { syndicate: "[암호화] ", group: "", wiretap: "[도청] " };
+const CHANNEL_TAG = { syndicate: "[암호화] ", group: "", wiretap: "[도청] ", ghost: "[유령] " };
 
 socket.on("chat", (msg) => {
   const mine = msg.fromId === socket.id;
@@ -1852,7 +1856,8 @@ function drawDex() {
       ["하루 흐름", "1일차 낮 → 밤 → 아침(CCTV) → 낮 → 투표(2일차부터) → 밤 … 착륙일 투표가 끝나면 착륙."],
       ["낮", "카지노 · 그룹 채팅 · 송금. 낮이 시작될 때 수입 (VIP 30만, 나머지 10만)."],
       ["밤", "통행금지. 직업 능력 · 1:1 메신저 · 경매장 · 다크넷 · 송금."],
-      ["투표", "최다 득표자는 비행선 밖으로. 동점이면 없음. 모두 투표하면 바로 마감."],
+      ["투표", "최다 득표자는 피해 1 + 전 재산 몰수 (돈은 사라짐, 금액은 공개). 체력이 0이 되면 비행선 밖으로 추방. 동점이면 없음. 대부의 표는 1.5표. 모두 투표하면 바로 마감."],
+      ["사망 후", "유령 채널에서 죽은 사람끼리 대화 가능 (살아있는 사람에게는 안 보임). 낮엔 그룹 채팅, 밤엔 모든 1:1 대화를 관전."],
       ["체력", "VIP 3, 나머지 2. 부상이어도 능력·아이템은 그대로 사용 가능."],
       ["신디케이트", "밤마다 공격 투표 또는 특수 능력 중 하나. 표가 갈리면 50% 확률로만 공격."],
       ["경호원", "자신 말고 1명 경호. 막아내면 아무도 안 다치고 경호 보수 +" + catalog.rules.bodyguardReward + "만."],

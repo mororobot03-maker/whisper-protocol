@@ -33,6 +33,7 @@ const MORNING_SECONDS = 10; // 아침 최소 시간. 사건이 많으면 자동�
 const SECONDS_PER_EVENT = 6; // 사건 하나당 CCTV 재생 시간 (방문 → 공격 → 방어·회복 → 결과)
 const SECONDS_PER_LINE = 2.6; // 글자만 있는 방송 한 줄
 const SECONDS_PER_EXECUTION = 8.5; // 처형 연출 (판결 → 에어락 카운트다운 → 추방 → 정적)
+const SECONDS_PER_PUNISH = 7.5; // 투표 처벌 연출 (판결 → 충격 → 재산 몰수)
 const BASE_INCOME = 10; // 매 턴 기본 수입 (만 크레딧)
 const VIP_INCOME = 30;
 const DEV_START_CREDITS = Number(process.env.START_CREDITS) || 0; // 값이 있으면 방 설정보다 우선 (테스트용)
@@ -175,7 +176,9 @@ function attackTally(game) {
 // 인원수에 맞춰 랜덤으로 뽑은 직업을 섞어서 한 명씩 나눠줌
 function assignRoles(game) {
   const count = game.players.length;
-  const deck = shuffle(generateRoles(count, game.settings.bans));
+  // 테스트용: FORCE_ROLES=vip,godfather,citizen 처럼 주면 입장 순서대로 그 직업 (인원과 개수가 같을 때만)
+  const forced = (process.env.FORCE_ROLES || "").split(",").filter((id) => own(ROLES, id));
+  const deck = forced.length === count ? forced : shuffle(generateRoles(count, game.settings.bans));
   game.pool = rolePool(game.settings.bans, count); // 이번 판에 "나올 수 있는" 직업 (모두에게 공개)
 
   game.players.forEach((p, i) => {
@@ -757,7 +760,7 @@ function startGame(game) {
 
 // 방송으로 보여줄 시간: 줄 수에 맞춰 늘어남
 function sequenceSeconds(sequence, min) {
-  const total = sequence.reduce((t, item) => t + (item.type === "executed" ? SECONDS_PER_EXECUTION : item.type ? SECONDS_PER_EVENT : SECONDS_PER_LINE), 0);
+  const total = sequence.reduce((t, item) => t + (item.type === "executed" ? SECONDS_PER_EXECUTION : item.type === "punished" ? SECONDS_PER_PUNISH : item.type ? SECONDS_PER_EVENT : SECONDS_PER_LINE), 0);
   return sec(Math.max(min, Math.ceil(3.5 + total))); // 3.5초: 단계 타이틀 카드 + 여유
 }
 
@@ -911,7 +914,7 @@ function startVote(game) {
     return {
       canVote: true,
       candidates: candidates.filter((n) => n !== p.name),
-      info: "비행선 밖으로 던질 사람을 고르세요. 최다 득표자는 즉시 사망합니다.",
+      info: "의심되는 사람을 고르세요. 최다 득표자는 피해 1 + 전 재산 몰수 (체력이 0이 되면 비행선 밖으로 추방).",
     };
   });
 
@@ -937,7 +940,8 @@ function resolveVote(game) {
     const target = findPlayer(game, game.votes[voterId]);
     if (!voter || !voter.alive || !target || !target.alive) continue;
     if (voter.id === game.fixedVoter) continue; // 픽서에게 매수당한 표는 몰래 빠짐
-    const weight = game.today.bribes.has(voter.id) ? 2 : 1; // 뇌물을 산 사람은 2표
+    // 대부는 1.5표 (동점일 때 대부 쪽이 이김), 뇌물을 산 사람은 2배
+    const weight = (voter.role === "godfather" ? 1.5 : 1) * (game.today.bribes.has(voter.id) ? 2 : 1);
     tally[target.id] = (tally[target.id] || 0) + weight;
   }
 
@@ -952,20 +956,35 @@ function resolveVote(game) {
   const tie = results[1] && results[1].count === top.count;
   let victim = null;
 
-  if (!top) sequence.push({ text: "아무도 표를 받지 않았다. 처형 없음." });
-  else if (tie) sequence.push({ text: "최다 득표가 동점이다. 처형 없음." });
+  // 투표 결과: 최다 득표자는 피해 1 + 전 재산 몰수 (몰수한 돈은 사라짐). 체력이 0이 되면 추방
+  if (!top) sequence.push({ text: "아무도 표를 받지 않았다. 처벌 없음." });
+  else if (tie) sequence.push({ text: "최다 득표가 동점이다. 처벌 없음." });
   else {
-    victim = game.players.find((p) => p.name === top.name);
-    victim.alive = false;
-    victim.hp = 0;
-    const item = { type: "executed", name: victim.name, text: victim.name + "가 비행선 밖으로 추방되었다!" };
-    if (game.settings.revealRole === "show") {
-      item.role = ROLES[victim.role].name + " (" + TEAM_NAMES[victim.team] + ")";
-      item.roleId = victim.role;
+    const target = game.players.find((p) => p.name === top.name);
+    const seized = target.credits;
+    target.credits = 0;
+    target.hp -= 1;
+    if (target.hp <= 0) {
+      victim = target;
+      victim.alive = false;
+      victim.hp = 0;
+      const item = { type: "executed", name: victim.name, text: victim.name + "가 비행선 밖으로 추방되었다!" };
+      if (game.settings.revealRole === "show") {
+        item.role = ROLES[victim.role].name + " (" + TEAM_NAMES[victim.team] + ")";
+        item.roleId = victim.role;
+      }
+      sequence.push(item);
+    } else {
+      sequence.push({
+        type: "punished",
+        name: target.name,
+        amount: seized,
+        text: target.name + "가 피해를 입고 전 재산 " + seized + "만을 몰수당했다!",
+      });
     }
-    sequence.push(item);
     sendBoard(game);
     sendStatus(game);
+    sendEconomy(game, target);
   }
   const lines = sequence.map((s) => (s.role ? s.text + " 직업: " + s.role : s.text));
 
@@ -973,7 +992,7 @@ function resolveVote(game) {
   sendPhase(game, { phase: "result", title: "투표 결과", seconds, lines, sequence });
 
   schedule(game, seconds, () => {
-    // 현상금 사냥꾼: 타깃이 투표로 처형되면 단독 승리
+    // 현상금 사냥꾼: 타깃이 투표로 사망(추방)하면 단독 승리
     const hunter = victim && alivePlayers(game).find((p) => p.bountyTarget === victim.id);
     if (hunter) return endGame(game, "third", "현상금 사냥꾼 " + hunter.name + "가 " + victim.name + "의 현상금을 챙겼다.", hunter);
     if (!endIfWinner(game)) endDay(game);
@@ -1200,12 +1219,18 @@ io.on("connection", (socket) => {
     if (!game) return;
 
     const me = findPlayer(game, socket.id);
-    if (!me || !me.alive) return; // 사망자는 말할 수 없음
+    if (!me || game.phase === "lobby") return;
 
     const clean = String(text ?? "").trim().slice(0, 200);
     if (!clean) return;
 
     const msg = { fromId: socket.id, from: me.name, text: clean };
+
+    // 사망자 전용 유령 채널: 죽은 사람끼리만 (언제든). 살아있는 사람에게는 절대 안 감
+    if (!me.alive) {
+      for (const p of game.players) if (!p.alive && p.connected) io.to(p.id).emit("chat", { ...msg, channel: "ghost" });
+      return;
+    }
 
     if (game.phase === "night" && me.team === "syndicate") {
       io.to("syn:" + game.code).emit("chat", { ...msg, channel: "syndicate" });

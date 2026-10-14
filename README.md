@@ -37,3 +37,4 @@ node server.js
 | `START_CREDITS` | 시작 자금 강제 |
 | `AUCTION_ITEMS` | 경매 출품 강제 (예: `wiretap,forge`) |
 | `AUCTION_LOT_SECONDS` | 경매 건당 시간 (기본 20초) |
+| `FORCE_ROLES` | 직업 강제 (입장 순서대로, 예: `vip,godfather,citizen,citizen`) |

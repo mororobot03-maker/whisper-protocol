@@ -87,6 +87,7 @@ const ICON_PATHS = {
   role_bodyguard: '<path d="M12 2.5l8 3v6c0 4.8-3.4 8.6-8 10-4.6-1.4-8-5.2-8-10v-6z"/><path d="M8.5 11.5l2.5 2.5 4.5-5"/>',
   role_watcher: '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
   role_dealer: '<rect x="3.5" y="5.5" width="10" height="14" rx="1.5" transform="rotate(-10 8.5 12.5)"/><rect x="10.5" y="4.5" width="10" height="14" rx="1.5" transform="rotate(10 15.5 11.5)"/><path d="M15.5 9.5l1.5 2-1.5 2-1.5-2z"/>',
+  role_godfather: '<path d="M4 10.5h16"/><path d="M7 10.5c0-3 1.5-6 5-6s5 3 5 6"/><path d="M8.5 13.5c0 3.5 1.6 6 3.5 6s3.5-2.5 3.5-6"/><path d="M10 15.5h4"/>',
   role_mercenary: '<path d="M5 19l9-9M14 10l2-6 4 4-6 2"/><path d="M4 14l6 6M3 20l3-3"/><circle cx="17.5" cy="17.5" r="3.5"/><path d="M17.5 16v3M16 17.5h3"/>',
   role_double: '<path d="M3 5c3 1.2 6 1.2 9 0v6.5c0 3-2 5-4.5 5S3 14.5 3 11.5z"/><path d="M12 8c3 1.2 6 1.2 9 0v6.5c0 3-2 5-4.5 5-1.6 0-3-.8-3.8-2.2"/><path d="M5.5 10h1.5M9 10h.5M14.5 13h1.5M18 13h.5M6 13.5c.8.6 2 .6 2.8 0M15 17c.8-.6 2-.6 2.8 0"/>',
   role_citizen: '<circle cx="12" cy="7.5" r="3.5"/><path d="M5 20.5c.8-4.2 3.5-6.5 7-6.5s6.2 2.3 7 6.5"/>',

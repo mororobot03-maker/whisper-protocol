@@ -411,6 +411,64 @@ async function playJam(item) {
   await sleep(900);
 }
 
+// 투표 처벌 (죽지 않은 경우): 스포트라이트 → 충격(피해 1) → 돈다발이 빨려 나감(전 재산 몰수)
+async function playPunish(item, room, at) {
+  const t = (ms) => (calm ? Math.min(ms, 300) : ms);
+  caption("판결이 내려졌다…", "bad");
+  map.el.classList.add("verdict");
+  room.classList.add("spotlight");
+  await sleep(t(1400));
+
+  // 충격: 피해 1
+  room.classList.add("fx-hit");
+  map.el.classList.add("death-flash");
+  sound.play("slash");
+  sound.play("hurt", 120);
+  burst("fx-icon crack", "", at, [
+    { transform: "translate(-50%,-60%) scale(0.4)", opacity: 0 },
+    { transform: "translate(-50%,-95%) scale(1.3)", opacity: 1, offset: 0.35 },
+    { transform: "translate(-50%,-130%) scale(1)", opacity: 0 },
+  ], 1300).catch(() => {});
+  map.fx.lastChild?.appendChild(icon("heartCracked"));
+  caption("피해 1!", "bad");
+  await sleep(t(1300));
+  map.el.classList.remove("death-flash");
+
+  // 전 재산 몰수: 코인이 방에서 뿜어져 나와 해치로 빨려 들어감
+  const center = posIn(map.hatch);
+  sound.play("spend");
+  burst("seize-label", "−" + (item.amount || 0) + "만", { x: at.x, y: at.y - 40 }, [
+    { transform: "translate(-50%,-50%) scale(0.6)", opacity: 0 },
+    { transform: "translate(-50%,-70%) scale(1.2)", opacity: 1, offset: 0.25 },
+    { transform: "translate(-50%,-110%) scale(1)", opacity: 0 },
+  ], 2000).catch(() => {});
+  const coins = Math.min(10, 3 + Math.floor((item.amount || 0) / 15));
+  for (let i = 0; i < coins; i++) {
+    const c = el("span", "seize-coin");
+    c.appendChild(icon("credit"));
+    place(c, at);
+    map.fx.appendChild(c);
+    const dx = center.x - at.x + (Math.random() - 0.5) * 30;
+    const dy = center.y - at.y + (Math.random() - 0.5) * 30;
+    const up = -30 - Math.random() * 40;
+    c.animate(
+      [
+        { transform: "translate(-50%,-50%) scale(0.6)", opacity: 0 },
+        { transform: "translate(calc(-50% + " + (Math.random() - 0.5) * 60 + "px), calc(-50% + " + up + "px)) scale(1)", opacity: 1, offset: 0.3 },
+        { transform: "translate(calc(-50% + " + dx + "px), calc(-50% + " + dy + "px)) scale(0.3)", opacity: 0 },
+      ],
+      { duration: calm ? 1 : 1300 + i * 70, easing: "ease-in", fill: "forwards", delay: calm ? 0 : i * 60 }
+    ).finished.then(() => c.remove());
+    if (i % 3 === 0) sound.play("coin", i * 80);
+  }
+  await sleep(t(1700));
+
+  room.classList.remove("spotlight", "fx-hit");
+  map.el.classList.remove("verdict");
+  caption(item.text, "bad");
+  await sleep(t(2000));
+}
+
 // 사건 하나 재생: 방문 → 공격(또는 치료) → 방어·회복 → 결과 순서로 천천히
 async function playEvent(item) {
   if (item.type === "jammed") return playJam(item);
@@ -419,6 +477,7 @@ async function playEvent(item) {
   const at = posIn(room);
 
   if (item.type === "executed") return playExecution(item, room, at);
+  if (item.type === "punished") return playPunish(item, room, at);
 
   camClock += 17 + Math.floor(Math.random() * 40);
   const healing = item.type === "healed";

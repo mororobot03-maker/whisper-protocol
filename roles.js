@@ -22,9 +22,10 @@ const ROLES = {
   doppelganger: { name: "도플갱어",  team: "syndicate", desc: "조사에서 시민팀 직업으로 보임 (항상 적용)" },
   viper:        { name: "바이퍼",    team: "syndicate", desc: "공격 투표 또는 독 투여 중 택1. 독에 걸리면 다음 날 밤 부상" },
   fixer:        { name: "픽서",      team: "syndicate", desc: "공격 투표 또는 매수 중 택1. 매수당한 사람의 다음 날 투표는 몰래 무효" },
+  godfather:    { name: "대부",      team: "syndicate", desc: "특수 능력 없이 매일 밤 공격 투표. 낮 투표에서 내 표는 1.5표 (동점이면 대부 쪽이 이김)" },
   sponsor:      { name: "스폰서",    team: "syndicate", startBonus: 60, desc: "시작 자금 +60만 (항상 적용). 돈으로 동료를 지원" },
 
-  bounty:   { name: "현상금 사냥꾼", team: "third", desc: "타깃이 투표로 처형되면 단독 승리" },
+  bounty:   { name: "현상금 사냥꾼", team: "third", desc: "타깃이 투표로 추방(사망)되면 단독 승리" },
   stowaway: { name: "밀항자",        team: "third", desc: "착륙까지 생존하면 단독 승리" },
 };
 
