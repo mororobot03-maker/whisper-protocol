@@ -227,7 +227,7 @@ function drawSlots() {
   const reels = make("div", "sl-reels");
   for (let i = 0; i < 3; i++) reels.appendChild(make("span", "sl-reel", "7"));
   cas.table.appendChild(reels);
-  cas.table.appendChild(make("p", "cas-odds", "같은 그림 2개 ×1.1 · 3개 ×1.6 · 7 세 개 ×6"));
+  cas.table.appendChild(make("p", "cas-odds", "같은 그림 2개 ×1.4 · 3개 ×4.5 · 7 세 개 ×25 · 하나도 안 맞으면 판돈을 잃어요"));
   cas.table.appendChild(playBtn("레버 당기기 · " + cas.bet + "만", () => {
     send({ game: "slots", stake: cas.bet });
     startReels();
@@ -275,7 +275,7 @@ function drawHilo() {
   row.appendChild(cardEl(a ? a.cardName : "?", a ? "" : "back"));
   cas.table.appendChild(row);
   if (!a) {
-    cas.table.appendChild(make("p", "cas-odds", "다음 카드가 높을지 낮을지 맞히세요. 같은 숫자는 틀린 것. 틀리면 판돈만 돌려받아요."));
+    cas.table.appendChild(make("p", "cas-odds", "다음 카드가 높을지 낮을지 맞히세요. 같은 숫자는 틀린 것. 맞힐 때마다 배당이 오르고 언제든 수령할 수 있지만, 틀리면 판돈을 잃어요."));
     cas.table.appendChild(playBtn("시작 · " + cas.bet + "만", () => send({ game: "hilo", stake: cas.bet })));
     return;
   }
@@ -290,7 +290,7 @@ function drawHilo() {
   mk("▲ 높다", "hl-up", { game: "hilo", action: "guess", dir: "up" });
   mk("▼ 낮다", "hl-down", { game: "hilo", action: "guess", dir: "down" });
   const cur = a.step > 0 ? cas.state.hiloSteps[a.step - 1] : 1;
-  mk("수령 ×" + cur + " · " + Math.max(a.stake, Math.round(a.stake * cur)) + "만", "hl-cash primary", { game: "hilo", action: "cash" });
+  mk("수령 ×" + cur + " · " + Math.round(a.stake * cur) + "만", "hl-cash primary", { game: "hilo", action: "cash" });
   cas.table.appendChild(btns);
 }
 
@@ -320,7 +320,7 @@ function drawBlackjack() {
   if (!a) {
     cas.table.appendChild(hand("딜러", ["?", "?"]));
     cas.table.appendChild(hand("나", ["?", "?"]));
-    cas.table.appendChild(make("p", "cas-odds", "21에 가까우면 승리 ×1.2, 처음 두 장이 21이면 ×1.5. 지거나 비기면 판돈만 돌려받아요. 딜러는 17 이상이면 멈춰요."));
+    cas.table.appendChild(make("p", "cas-odds", "21에 가까우면 승리 ×1.6, 처음 두 장이 21이면 ×2, 비기면 판돈 그대로. 지면 판돈을 잃어요. 딜러는 17 이상이면 멈춰요."));
     cas.table.appendChild(playBtn("딜 · " + cas.bet + "만", () => send({ game: "blackjack", stake: cas.bet })));
     return;
   }
@@ -368,7 +368,7 @@ function drawRhythm() {
   tap.addEventListener("pointerdown", (e) => { e.preventDefault(); rhythmHit(); });
   cas.table.appendChild(tap);
   if (!cas.rhythm) {
-    cas.table.appendChild(make("p", "cas-odds", "내려오는 블록이 선에 닿을 때 누르세요. 16개 · 약 10초. 정확도에 따라 ×1.0 ~ ×1.25 (헛손질은 감점)."));
+    cas.table.appendChild(make("p", "cas-odds", "내려오는 블록이 선에 닿을 때 누르세요. 16개 · 약 10초. 정확도에 따라 ×0.5 ~ ×1.3 (80% 이상이면 이득, 헛손질은 감점)."));
     cas.table.appendChild(playBtn("채굴 시작 · " + cas.bet + "만", () => send({ game: "rhythm", stake: cas.bet })));
   }
 }
@@ -565,14 +565,15 @@ socket.on("casinoResult", async (r) => {
     let text;
     if (r.game === "rhythm") text = "정확도 " + r.acc + "% · ×" + r.mult;
     else if (r.game === "blackjack") text = { natural: "블랙잭!", win: "승리!", push: "무승부", lose: "딜러 승", bust: "버스트 (21 초과)" }[r.result] + " ×" + r.mult;
-    else if (r.game === "roulette") text = r.n + (r.color === "red" ? " 빨강" : r.color === "black" ? " 검정" : " 초록") + " · " + (r.win ? "적중! ×" + r.mult : "빗나감 ×1");
-    else if (r.game === "race") text = r.order[0] + " 우승 · " + (r.win ? "적중! ×" + r.mult : "빗나감 ×1");
-    else if (r.game === "hilo") text = (r.mult > 1 ? "수령 ×" + r.mult : "틀렸다 ×1");
-    else text = r.win ? "당첨! ×" + r.mult : "꽝 ×1";
-    cas.result.textContent = text + " → " + r.back + "만 돌려받음" + (r.gain ? " (+" + r.gain + ")" : "");
+    else if (r.game === "roulette") text = r.n + (r.color === "red" ? " 빨강" : r.color === "black" ? " 검정" : " 초록") + " · " + (r.win ? "적중! ×" + r.mult : "빗나감");
+    else if (r.game === "race") text = r.order[0] + " 우승 · " + (r.win ? "적중! ×" + r.mult : "빗나감");
+    else if (r.game === "hilo") text = r.mult > 0 ? "수령 ×" + r.mult : "틀렸다";
+    else text = r.win ? "당첨! ×" + r.mult : "꽝";
+    const money = r.gain > 0 ? "+" + r.gain + "만" : r.gain < 0 ? "−" + -r.gain + "만 (내일 절반 반환)" : "본전";
+    cas.result.textContent = text + " → " + money;
     cas.result.className = "cas-result " + (r.gain > 0 ? "win" : "lose");
     sound.play(r.gain > 0 ? "win" : "lose");
-    addLine("◆ 카지노 " + name + ": " + text + (r.gain ? " +" + r.gain + "만" : " (본전)"), "system econ");
+    addLine("◆ 카지노 " + name + ": " + text + " " + money, "system econ");
   }
   hold(false);
   drawTable();

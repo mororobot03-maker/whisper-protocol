@@ -37,6 +37,7 @@ const BASE_INCOME = 10; // 매 턴 기본 수입 (만 크레딧)
 const VIP_INCOME = 30;
 const DEV_START_CREDITS = Number(process.env.START_CREDITS) || 0; // 값이 있으면 방 설정보다 우선 (테스트용)
 const VOTE_SECONDS = 25;
+const BANKHACK_MAX = 50; // 계좌 해킹 최대 금액 (만)
 const VOTE_EARLY_SECONDS = 2; // 전원이 투표하면 이 시간 뒤 바로 마감
 const RESULT_SECONDS = 6;
 
@@ -186,7 +187,8 @@ function assignRoles(game) {
     p.credits += ROLES[p.role].startBonus || 0; // 스폰서 추가 자금
     p.svcUses = {}; // 다크넷 서비스별 이용 횟수 (쓸수록 비싸짐)
     p.miner = 0; // 크립토 채굴기 남은 턴
-    p.casino = null; // 카지노 기록 (하루 판 수 등)
+    p.casino = null; // 카지노 기록 (하루 판 수, 손익 등)
+    p.mercUsed = {}; // 용병: 쓴 능력 { strike, guard }
   });
   game.deepfakeUsed = false;
   game.itemSeq = 0;
@@ -219,7 +221,7 @@ function assignRoles(game) {
       serviceLimit: SERVICE_NIGHT_LIMIT,
       casino: casino.CASINO,
       landingDays: game.landingDays,
-      bodyguardReward: 30,
+      bodyguardReward: 50,
     },
   });
 
@@ -235,7 +237,11 @@ function assignRoles(game) {
       teamId: role.team,
       desc: role.desc,
       allies: p.team === "syndicate" ? syndicate.filter((s) => s !== p).map((s) => s.name) : [],
-      extra: p.bountyTarget ? "타깃: " + findPlayer(game, p.bountyTarget).name : "",
+      extra: p.bountyTarget
+        ? "타깃: " + findPlayer(game, p.bountyTarget).name
+        : p.role === "double"
+          ? "VIP: " + (game.players.find((v) => v.role === "vip")?.name || "?")
+          : "",
       pool: poolByTeam(game.pool),
     });
   }
@@ -389,7 +395,35 @@ function nextLot(game) {
   a.live = lot;
   if (lot.id === "deepfake") game.deepfakeUsed = true; // 출품되면 다시 나오지 않음
   sendAuctionAll(game, { event: "lot" });
-  a.timers.push(setTimeout(() => endLot(game, lot), AUCTION.lotSeconds * 1000));
+  lot.timer = setTimeout(() => endLot(game, lot), AUCTION.lotSeconds * 1000);
+  a.timers.push(lot.timer);
+}
+
+// 경매가 밤 시간보다 길어질 것 같으면 밤을 늘리고 모두의 타이머를 고침
+function extendNight(game) {
+  const night = game.night;
+  const a = night && night.auction;
+  if (!a || game.phase !== "night") return;
+  const now = Date.now();
+  const pending = a.lots.filter((l) => l.status === "pending").length;
+  const lotEnd = a.live ? a.live.endsAt : now + (a.index < 0 ? AUCTION.startDelay * 1000 : 0);
+  const estimate = lotEnd + pending * (AUCTION.lotSeconds + AUCTION.gapSeconds) * 1000 + AUCTION.gapSeconds * 1000 + 3000;
+  if (estimate <= night.endsAt) return;
+  night.endsAt = estimate;
+  io.to("game:" + game.code).emit("timer", Math.ceil((estimate - now) / 1000));
+}
+
+// 밤 끝: 경매가 아직이면 끝날 때까지 기다림
+function tryEndNight(game) {
+  const night = game.night;
+  const left = night.endsAt - Date.now();
+  if (left > 300) return schedule(game, left / 1000, () => tryEndNight(game));
+  const a = night.auction;
+  if (a && a.index < a.lots.length) {
+    night.endsAt = Date.now() + 1000;
+    return schedule(game, 1, () => tryEndNight(game));
+  }
+  startMorning(game);
 }
 
 function endLot(game, lot) {
@@ -436,6 +470,15 @@ function placeBid(game, me, data) {
   const prev = findPlayer(game, lot.leader);
   lot.price = amount;
   lot.leader = me.id;
+  // 입찰이 들어오면 남은 시간을 최소 10초로 되돌림 (막판 눈치싸움)
+  const extend = AUCTION.bidExtendSeconds * 1000;
+  if (lot.endsAt - Date.now() < extend) {
+    lot.endsAt = Date.now() + extend;
+    clearTimeout(lot.timer);
+    lot.timer = setTimeout(() => endLot(game, lot), extend);
+    a.timers.push(lot.timer);
+    extendNight(game);
+  }
   sendAuctionAll(game, { event: "bid" });
   if (prev && prev !== me) {
     econMsg(prev, ITEMS[lot.id].name + ": 더 높은 입찰이 들어왔다. (" + amount + "만)");
@@ -537,7 +580,7 @@ function hasFirewall(game, p) {
   return !!(set && set.has("firewall"));
 }
 
-// 채팅 해킹이 방화벽에 막혔는지 확인하고, 막혔으면 양쪽에 알림
+// 해킹(채팅 해킹 · 계좌 해킹)이 방화벽에 막혔는지 확인하고, 막혔으면 양쪽에 알림
 function hackBlocked(game, by, target, name) {
   if (!hasFirewall(game, target)) return false;
   econMsg(by, name + ": " + target.name + "의 방화벽에 막혔다.");
@@ -563,6 +606,9 @@ function applyItem(game, p, id, payload) {
   else if (id === "commlog") {
     if (hackBlocked(game, p, t, item.name)) return;
     night.commlogs.push({ by: p.id, target: t.id });
+  } else if (id === "bankhack") {
+    if (hackBlocked(game, p, t, item.name)) return;
+    night.bankhacks.push({ by: p.id, target: t.id });
   } else if (id === "wiretap") {
     if (hackBlocked(game, p, t, item.name)) return;
     (hacks.taps[t.id] = hacks.taps[t.id] || new Set()).add(p.id);
@@ -731,6 +777,7 @@ function startNight(game) {
     commlogs: [], // 통신 기록 열람 { by, target }
     speaker: [], // 선내 스피커 해킹 문장 (내일 아침 방송)
     svcCount: {}, // 오늘 밤 다크넷 이용 수 { id: n }
+    bankhacks: [], // 계좌 해킹 { by, target } (아침에 처리)
     auction: null,
   };
   game.tomorrow = emptyDayEffects(); // 오늘 밤에 산 "내일 효과" 아이템
@@ -751,11 +798,13 @@ function startNight(game) {
     };
   });
 
+  game.night.endsAt = Date.now() + seconds * 1000;
   startAuction(game);
+  extendNight(game); // 밤 시간이 경매보다 짧으면 늘림
   sendEconomyAll(game);
   for (const p of alivePlayers(game)) sendInventory(game, p);
 
-  schedule(game, seconds, () => startMorning(game));
+  schedule(game, seconds, () => tryEndNight(game));
 }
 
 // ----- 4. 아침 발표 (CCTV) -----
@@ -777,6 +826,17 @@ function startMorning(game) {
       if (m.to === t.name) partners.add(m.from);
     }
     tell(c.by, "통신 기록: " + t.name + "이(가) 어젯밤 대화한 사람 → " + (partners.size ? [...partners].join(", ") : "아무도 없음"));
+  }
+  // 계좌 해킹: 대상 크레딧의 절반 (최대 50만). 털린 사람은 누가 했는지 모름
+  for (const h of game.night.bankhacks) {
+    const thief = findPlayer(game, h.by);
+    const t = findPlayer(game, h.target);
+    if (!thief || !thief.alive || !t || !t.alive) continue;
+    const amount = Math.min(BANKHACK_MAX, Math.floor(t.credits / 2));
+    t.credits -= amount;
+    thief.credits += amount;
+    tell(thief.id, "계좌 해킹 성공: " + t.name + "의 계좌에서 " + amount + "만을 빼냈다. (+" + amount + "만)");
+    tell(t.id, "계좌가 털렸다! 누군가 " + amount + "만을 빼 갔다.");
   }
   // 쓰지 않은 낙찰품은 사라짐
   for (const it of game.night.inventory) tell(it.owner, ITEMS[it.id].name + "을(를) 쓰지 않아 효과 없이 사라졌다.");
@@ -805,9 +865,11 @@ function startMorning(game) {
 }
 
 // ----- 1. 낮 -----
-// 카지노 + 그룹 채팅 + 송금. 매일 낮이 시작될 때 수입이 들어옴
+// 카지노 + 그룹 채팅 + 송금. 매일 낮이 시작될 때 수입 + 전날 카지노 손실 50% 반환
 function startDay(game) {
   for (const p of alivePlayers(game)) {
+    const back = casino.refund(p, game.day);
+    if (back) econMsg(p, "어제 카지노 손실의 50%를 돌려받았다. (+" + back + "만)");
     p.credits += p.role === "vip" ? VIP_INCOME : BASE_INCOME;
     if (p.miner > 0) {
       p.credits += MINER_INCOME;
@@ -980,9 +1042,11 @@ function endGame(game, winner, reason, soloWinner) {
     { phase: "over", title: "게임 종료", seconds: 0, winner, headline, reason, lines: [headline, reason], reveal, day: game.day },
     (p) => ({ won: won(p) })
   );
+  // 방은 바로 로비로 (각자 결과 화면에서 "로비로 돌아가기"를 누르면 로비가 보임)
+  backToLobby(game);
 }
 
-// 게임이 끝난 뒤 방장이 로비로 되돌림
+// 게임이 끝나면 방을 로비 상태로 되돌림 (설정은 그대로)
 function backToLobby(game) {
   clearTimeout(game.timer);
   game.players = game.players.filter((p) => p.connected); // 나간 사람 정리
@@ -996,6 +1060,7 @@ function backToLobby(game) {
     p.svcUses = {};
     p.miner = 0;
     p.casino = null;
+    p.mercUsed = {};
   }
   game.today = emptyDayEffects();
   game.deepfakeUsed = false;
@@ -1242,22 +1307,6 @@ io.on("connection", (socket) => {
     game.votes[me.id] = target.id;
     socket.emit("voted", target.name);
     checkAllVoted(game);
-  });
-
-  on("backToLobby", () => {
-    const game = games[socket.data.code];
-    if (!game || game.phase !== "over" || game.hostId !== socket.id) return;
-    backToLobby(game);
-  });
-
-  // 같은 멤버, 같은 설정으로 바로 다시 시작 (인원이 바뀌어 설정이 안 맞으면 로비에 머묾)
-  on("restart", () => {
-    const game = games[socket.data.code];
-    if (!game || game.phase !== "over" || game.hostId !== socket.id) return;
-    backToLobby(game);
-    const { errors } = checkSettings(game);
-    if (errors.length > 0) return socket.emit("errorMsg", "바로 시작할 수 없습니다: " + errors[0]);
-    startGame(game);
   });
 
   // 접속 끊김

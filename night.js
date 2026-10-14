@@ -7,14 +7,16 @@
 //
 //  규칙 요약
 //  - 부상(체력이 최대보다 낮음)이어도 능력·아이템 모두 사용 가능 (v2에서 패널티 삭제)
-//  - 보디가드가 공격을 대신 막아내면 +30만 크레딧
+//  - 경호원이 공격을 막아내면 아무도 다치지 않고 경호원은 +50만 크레딧
+//  - 용병: 게임 전체에서 공격 1회, 방어 1회 (p.mercUsed = { strike, guard })
+//  - 직업 능력이 방해받으면 아침 CCTV에 "누군가의 능력이 방해받았다" (누구인지는 비공개)
 //  - 신디케이트는 모두 [공격 투표] 또는 [자기 특수 능력] 중 하나를 고름
 //    공격은 팀 전체 밤 1회. 표가 한 사람에게 모이면 공격, 갈리면 50% 확률로만 공격
 // =====================================================
 const { ROLES } = require("./roles");
 const { DEEPFAKE_TEMPLATES } = require("./economy");
 
-const BODYGUARD_REWARD = 30; // 경호 성공 보수 (만 크레딧)
+const BODYGUARD_REWARD = 50; // 경호 성공 보수 (만 크레딧)
 
 // 직업별 밤 행동 정의
 //  self: 자기 자신을 고를 수 있는지 / noAlly: 신디케이트 동료는 못 고름
@@ -24,6 +26,7 @@ const ACTIONS = {
   whitehat:  { label: "능력 방해" },
   ripperdoc: { label: "치료" },
   bodyguard: { label: "경호" },
+  mercenary: { label: "용병 의뢰" }, // 실제 선택지는 남은 횟수에 따라 nightOptions에서 정함
   watcher:   { label: "감시" },
   dealer:    { label: "크레딧 확인" },
 };
@@ -65,11 +68,29 @@ function nightOptions(game, p) {
     return { label: "오늘 밤 행동 (하나만)", modes, modeCandidates, candidates: attackTo, note: note + " 특수 능력을 고르면 공격 투표에는 참여하지 않습니다." };
   }
 
+  // 용병: 남은 능력(공격 / 방어) 중 하나. 안 고르면 쉬는 것
+  if (p.role === "mercenary") {
+    const used = p.mercUsed || {};
+    const modes = {};
+    const modeCandidates = {};
+    if (!used.strike) {
+      modes.strike = "공격 (1회)";
+      modeCandidates.strike = alive.filter((t) => t !== p).map((t) => t.name);
+    }
+    if (!used.guard) {
+      modes.guard = "방어 (1회)";
+      modeCandidates.guard = alive.map((t) => t.name); // 자신도 가능
+    }
+    if (!Object.keys(modes).length) return { reason: "공격과 방어를 모두 써서 더 할 수 있는 일이 없습니다." };
+    const first = Object.keys(modes)[0];
+    return { label: "오늘 밤 의뢰 (안 고르면 쉼)", modes, modeCandidates, candidates: modeCandidates[first], note: "각각 게임 전체에서 한 번만 쓸 수 있어요. 방해받으면 횟수는 남아요." };
+  }
+
   const act = ACTIONS[p.role];
   if (!act) return { reason: "밤에 할 수 있는 직업 능력이 없습니다." };
 
   let candidates = alive;
-  if (!act.self) candidates = candidates.filter((t) => t !== p);
+  if (!act.self) candidates = candidates.filter((t) => t !== p); // 경호원도 자신은 못 고름
   return { label: act.label, pair: !!act.pair, modes: null, candidates: candidates.map((t) => t.name), note: "" };
 }
 
@@ -238,8 +259,12 @@ function resolveNight(game, rand = Math.random) {
 
   // 직업 능력이 통하는지 (다크넷 서비스와 아이템은 방해로 못 막음)
   const works = (a) => a && !blocked.has(a.actor.id) && !firewalled.has(a);
+  const jams = []; // 아침 CCTV: 방해받은 능력 하나마다 1번 (누구인지는 비공개)
   for (const a of [...acts, attack]) {
-    if (a && blocked.has(a.actor.id)) tell(a.actor, "능력이 방해받아 실패했다.");
+    if (a && blocked.has(a.actor.id)) {
+      tell(a.actor, "능력이 방해받아 실패했다.");
+      jams.push({ type: "jammed", text: "누군가의 능력이 방해받았다." });
+    }
   }
 
   // ----- 2. 공격 (독, 블레이드, 청부업자) -----
@@ -247,15 +272,28 @@ function resolveNight(game, rand = Math.random) {
   const hit = (t) => (dmg[t.id] = (dmg[t.id] || 0) + 1);
   const guard = actOf("bodyguard");
 
-  // 경호: 보디가드가 지키는 사람이 맞으면 대신 맞음
+  // 용병 방어: 지키는 사람은 오늘 밤 공격 피해 없음
+  const merc = actOf("mercenary");
+  const mercGuard = merc && merc.mode === "guard" && works(merc) ? merc : null;
+  const mercStrike = merc && merc.mode === "strike" && works(merc) ? merc : null;
+  if (merc && works(merc)) merc.actor.mercUsed = { ...(merc.actor.mercUsed || {}), [merc.mode]: true }; // 성공한 능력만 횟수 차감
+
+  // 경호: 경호원이 지키는 사람을 노린 공격은 막힘 (경호원도 다치지 않음)
+  let guardPaid = false;
   const strike = (t) => {
     if (works(guard) && guard.target === t) {
-      hit(guard.actor);
-      guard.actor.credits += BODYGUARD_REWARD;
-      tell(guard.actor, t.name + "을(를) 노린 공격을 대신 받아냈다. 경호 보수 +" + BODYGUARD_REWARD + "만");
-    } else {
-      hit(t);
+      if (!guardPaid) {
+        guard.actor.credits += BODYGUARD_REWARD;
+        guardPaid = true;
+      }
+      tell(guard.actor, t.name + "을(를) 노린 공격을 막아냈다. 경호 보수 +" + BODYGUARD_REWARD + "만");
+      return;
     }
+    if (mercGuard && mercGuard.target === t) {
+      tell(mercGuard.actor, t.name + "을(를) 노린 공격을 막아냈다.");
+      return;
+    }
+    hit(t);
   };
 
   // 어젯밤 독이 오늘 밤 터짐 (방해로 막을 수 없음)
@@ -277,6 +315,12 @@ function resolveNight(game, rand = Math.random) {
     strike(s.target);
     tell(s.actor, "청부업자가 " + s.shown.name + "에 대한 일을 처리했다.");
   }
+
+  if (mercStrike) {
+    strike(mercStrike.target);
+    tell(mercStrike.actor, mercStrike.shown.name + "을(를) 습격했다. (공격 1회 사용)");
+  }
+  if (mercGuard) tell(mercGuard.actor, mercGuard.shown.name + "을(를) 밤새 지켰다. (방어 1회 사용)");
 
   // ----- 3. 피하 장갑: 오늘 받은 피해 1 무효 -----
   for (const id in dmg) {
@@ -413,6 +457,7 @@ function resolveNight(game, rand = Math.random) {
     }
   }
 
+  events.unshift(...jams); // 방해는 밤 초반에 일어난 일이라 맨 앞에
   const lines = events.map((e) => e.text);
   if (lines.length === 0) lines.push("어젯밤은 조용히 지나갔다.");
   return { lines, events, priv };

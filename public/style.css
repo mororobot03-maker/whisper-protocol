@@ -2534,3 +2534,22 @@ body:has(.game[data-phase="night"]) {
   .game { grid-template-columns: 1fr 460px; }
   .mname { font-size: 12px; }
 }
+
+/* 능력 방해 (CCTV): 화면 지지직 + 그림자 깨짐 */
+.shipmap.jammed { animation: jam-shake 0.18s steps(2) infinite; }
+.shipmap.jammed::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, #ffffff14 0 2px, transparent 2px 5px), linear-gradient(90deg, #ff2fd122, #2ff4ff22);
+  border-radius: inherit;
+  mix-blend-mode: screen;
+  animation: jam-scan 0.25s steps(3) infinite;
+}
+@keyframes jam-shake { 0% { transform: translate(0, 0); } 50% { transform: translate(-3px, 1px); } 100% { transform: translate(2px, -1px); } }
+@keyframes jam-scan { 0% { background-position: 0 0, 0 0; } 100% { background-position: 0 12px, 30px 0; } }
+.mwalker.glitch svg { animation: glitch-fig 0.12s steps(2) infinite; filter: drop-shadow(3px 0 #ff2fd1) drop-shadow(-3px 0 #2ff4ff); }
+@keyframes glitch-fig { 0% { transform: translateX(-3px) skewX(10deg); opacity: 0.9; } 100% { transform: translateX(3px) skewX(-10deg); opacity: 0.5; } }
+.jam-label { position: absolute; z-index: 6; padding: 3px 8px; border-radius: 6px; background: #12060acc; border: 1px solid #ff2fd1; color: #ff9be8; font-weight: 800; font-size: 14px; letter-spacing: 2px; pointer-events: none; white-space: nowrap; }

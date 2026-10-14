@@ -1,51 +1,54 @@
 // =====================================================
 //  낮 카지노 6종 (서버 판정)
 //  - 하루 10판, 판돈 1 ~ 50만 (1만 단위)
-//  - 돈을 잃지 않는 구조: 판돈을 걸면 끝날 때 "판돈 × 배당"을 돌려받음. 배당은 항상 1.0 이상
-//    → 지면 판돈 그대로 돌려받고(×1.0), 이기면 더 받음
+//  - 판돈을 걸면 끝날 때 "판돈 × 배당"을 돌려받음. 지면 배당 0 (판돈을 잃음)
+//  - 대신 다음 날 낮이 시작될 때 "전날 순손실의 50%"를 돌려줌 (그 전에 죽으면 없음)
+//    → 낮에 잃은 돈은 그날 밤 경매에 못 씀: "지금 지를까, 밤 경매용 돈을 지킬까"
+//  - 배당은 50% 반환까지 넣어 계산했을 때 한 판 기대 수익이 약 +3~5%가 되도록 맞춤
+//    (반환이 없으면 대부분 손해 → 올인 반복이 위험해짐)
 //  - 결과는 전부 서버가 정함. 화면 연출은 결과를 보여 주는 것뿐
-//  - 한 판 기대 수익은 판돈의 약 7~10% (하루 최대치로 다 써도 약 40만)
 // =====================================================
 
-const CASINO = { playsPerDay: 10, maxBet: 50, minBet: 1 };
+const CASINO = { playsPerDay: 10, maxBet: 50, minBet: 1, refundRate: 0.5 };
 
 const GAMES = {
-  roulette:  { name: "룰렛",       odds: "색 ×1.15 · 구간 ×1.25 · 숫자 ×3.5" },
-  slots:     { name: "슬롯",       odds: "2개 ×1.1 · 3개 ×1.6 · 777 ×6" },
-  hilo:      { name: "하이로우",   odds: "맞힐 때마다 ×1.05 → ×1.5" },
-  blackjack: { name: "블랙잭",     odds: "승 ×1.2 · 블랙잭 ×1.5" },
-  rhythm:    { name: "리듬 채굴",  odds: "정확도에 따라 ×1.0 ~ ×1.25" },
-  race:      { name: "드론 레이스", odds: "드론마다 ×1.16 ~ ×3.0" },
+  roulette:  { name: "룰렛",       odds: "색 ×1.6 · 구간 ×2.2 · 숫자 ×20" },
+  slots:     { name: "슬롯",       odds: "2개 ×1.4 · 3개 ×4.5 · 777 ×25" },
+  hilo:      { name: "하이로우",   odds: "맞힐 때마다 ×1.25 → ×3.5" },
+  blackjack: { name: "블랙잭",     odds: "승 ×1.6 · 블랙잭 ×2 · 무 ×1" },
+  rhythm:    { name: "리듬 채굴",  odds: "정확도에 따라 ×0.5 ~ ×1.3" },
+  race:      { name: "드론 레이스", odds: "드론마다 ×1.6 ~ ×14" },
 };
 
 // ----- 룰렛: 0 ~ 36 -----
 const RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
 const ROULETTE_BETS = {
-  red:   { label: "빨강",    mult: 1.15, win: (n) => RED.has(n) },
-  black: { label: "검정",    mult: 1.15, win: (n) => n !== 0 && !RED.has(n) },
-  low:   { label: "1 ~ 12",  mult: 1.25, win: (n) => n >= 1 && n <= 12 },
-  mid:   { label: "13 ~ 24", mult: 1.25, win: (n) => n >= 13 && n <= 24 },
-  high:  { label: "25 ~ 36", mult: 1.25, win: (n) => n >= 25 && n <= 36 },
-  // number: 숫자 하나 → ×3.5
+  red:   { label: "빨강",    mult: 1.6, win: (n) => RED.has(n) },
+  black: { label: "검정",    mult: 1.6, win: (n) => n !== 0 && !RED.has(n) },
+  low:   { label: "1 ~ 12",  mult: 2.2, win: (n) => n >= 1 && n <= 12 },
+  mid:   { label: "13 ~ 24", mult: 2.2, win: (n) => n >= 13 && n <= 24 },
+  high:  { label: "25 ~ 36", mult: 2.2, win: (n) => n >= 25 && n <= 36 },
+  // number: 숫자 하나 → ×20
 };
-const ROULETTE_NUMBER_MULT = 3.5;
+const ROULETTE_NUMBER_MULT = 20;
 
 // ----- 슬롯: 기호별 나올 확률(가중치) -----
 const SLOT_SYMBOLS = ["7", "♠", "◆", "★", "☢", "♣"];
 const SLOT_WEIGHTS = [3, 4, 4, 4, 4, 4];
-const SLOT_PAY = { two: 1.1, three: 1.6, seven: 6 };
+const SLOT_PAY = { none: 0, two: 1.4, three: 4.5, seven: 25 };
 
 // ----- 하이로우: 맞힌 횟수별 배당 (5번 맞히면 자동 수령) -----
-const HILO_STEPS = [1.05, 1.12, 1.2, 1.32, 1.5];
+const HILO_STEPS = [1.25, 1.55, 2, 2.6, 3.5];
 const CARD_NAMES = { 11: "J", 12: "Q", 13: "K", 14: "A" };
 
 // ----- 블랙잭 -----
-const BJ_PAY = { win: 1.2, natural: 1.5 };
+const BJ_PAY = { win: 1.6, natural: 2 };
 
 // ----- 리듬 채굴: 노트 16개, 약 9초 -----
-const RHYTHM = { notes: 16, first: 1200, last: 9200, minGap: 380, perfect: 70, good: 140, ok: 210, maxMult: 0.25 };
+const RHYTHM = { notes: 16, first: 1200, last: 9200, minGap: 380, perfect: 70, good: 140, ok: 210, base: 0.5, gain: 0.8 }; // 배당 = 0.5 + 0.8 × 정확도² (0.5 ~ 1.3)
 
-// ----- 드론 레이스: 경주마다 4대의 우승 확률을 섞어서 배정, 배당 = 1 + 0.08 / 확률 -----
+// ----- 드론 레이스: 경주마다 4대의 우승 확률을 섞어서 배정 -----
+//  배당 = 1 + (0.04 + 0.5 × 질 확률) / 이길 확률  → 50% 반환을 넣으면 어느 드론이든 기대 수익 +4%
 const RACE_NAMES = ["볼트", "스팅어", "팬텀", "코멧"];
 const RACE_PROBS = [0.5, 0.3, 0.16, 0.04];
 
@@ -72,7 +75,7 @@ function handTotal(cards) {
 // 플레이어의 카지노 기록 (날이 바뀌면 판 수 초기화)
 function state(p, day) {
   if (!p.casino || p.casino.day !== day) {
-    p.casino = { day, plays: 0, active: null, race: p.casino?.race || null };
+    p.casino = { day, plays: 0, net: 0, active: null, race: p.casino?.race || null };
   }
   if (!p.casino.race) p.casino.race = newRaceCard(Math.random);
   return p.casino;
@@ -84,7 +87,7 @@ function newRaceCard(rand) {
     const j = Math.floor(rand() * (i + 1));
     [probs[i], probs[j]] = [probs[j], probs[i]];
   }
-  return RACE_NAMES.map((name, i) => ({ name, p: probs[i], mult: round2(1 + 0.08 / probs[i]) }));
+  return RACE_NAMES.map((name, i) => ({ name, p: probs[i], mult: Math.round((1 + (0.04 + 0.5 * (1 - probs[i])) / probs[i]) * 10) / 10 }));
 }
 
 // 화면에 보낼 카지노 상태
@@ -126,9 +129,20 @@ function takeStake(p, s, stake) {
 
 // 판 끝: 판돈 × 배당을 돌려줌 (배당은 1.0 이상이라 절대 손해 없음)
 function payout(p, stake, mult) {
-  const back = Math.max(stake, Math.round(stake * mult));
+  const back = Math.round(stake * mult);
   p.credits += back;
+  if (p.casino) p.casino.net += back - stake; // 오늘 손익 (다음 날 반환 계산용)
   return { mult: round2(mult), back, gain: back - stake };
+}
+
+// 새 낮이 시작될 때: 전날 순손실의 50% 반환. 반환한 금액을 돌려줌 (없으면 0)
+function refund(p, day) {
+  const s = p.casino;
+  if (!s || s.day >= day || s.net >= 0) return 0;
+  const amount = Math.round(-s.net * CASINO.refundRate);
+  s.net = 0;
+  p.credits += amount;
+  return amount;
 }
 
 // =====================================================
@@ -153,7 +167,7 @@ function handle(p, day, msg, rand = Math.random) {
       const err = takeStake(p, s, stake);
       if (err) return { error: err };
       const n = Math.floor(rand() * 37);
-      mult = n === pick ? ROULETTE_NUMBER_MULT : 1;
+      mult = n === pick ? ROULETTE_NUMBER_MULT : 0;
       return { game, n, color: n === 0 ? "green" : RED.has(n) ? "red" : "black", win: mult > 1, label, stake, ...payout(p, stake, mult) };
     }
     const b = Object.hasOwn(ROULETTE_BETS, bet) ? ROULETTE_BETS[bet] : null;
@@ -161,7 +175,7 @@ function handle(p, day, msg, rand = Math.random) {
     const err = takeStake(p, s, stake);
     if (err) return { error: err };
     const n = Math.floor(rand() * 37);
-    mult = b.win(n) ? b.mult : 1;
+    mult = b.win(n) ? b.mult : 0;
     return { game, n, color: n === 0 ? "green" : RED.has(n) ? "red" : "black", win: mult > 1, label: b.label, stake, ...payout(p, stake, mult) };
   }
 
@@ -171,7 +185,7 @@ function handle(p, day, msg, rand = Math.random) {
     if (err) return { error: err };
     const reels = [0, 1, 2].map(() => pickWeighted(SLOT_WEIGHTS, rand));
     const same = Math.max(...reels.map((r) => reels.filter((x) => x === r).length));
-    let mult = 1;
+    let mult = SLOT_PAY.none;
     let kind = "none";
     if (same === 3 && reels[0] === 0) [mult, kind] = [SLOT_PAY.seven, "seven"];
     else if (same === 3) [mult, kind] = [SLOT_PAY.three, "three"];
@@ -190,7 +204,7 @@ function handle(p, day, msg, rand = Math.random) {
     // 나머지 순위는 아무렇게나 (연출용)
     const rest = card.map((_, i) => i).filter((i) => i !== winner).sort(() => rand() - 0.5);
     const order = [winner, ...rest].map((i) => card[i].name);
-    const mult = winner === pick ? card[pick].mult : 1;
+    const mult = winner === pick ? card[pick].mult : 0;
     s.race = newRaceCard(rand); // 다음 경주는 새 배당
     return { game, order, pick: card[pick].name, win: mult > 1, stake, ...payout(p, stake, mult) };
   }
@@ -214,7 +228,7 @@ function handle(p, day, msg, rand = Math.random) {
       a.card = next;
       if (!ok) {
         s.active = null;
-        return { game, action, prev: cardName(prev), next: cardName(next), ok, done: true, stake: a.stake, ...payout(p, a.stake, 1) };
+        return { game, action, prev: cardName(prev), next: cardName(next), ok, done: true, stake: a.stake, ...payout(p, a.stake, 0) };
       }
       a.step++;
       if (a.step >= HILO_STEPS.length) {
@@ -251,7 +265,7 @@ function handle(p, day, msg, rand = Math.random) {
       if (pNat || dNat) {
         if (pNat && dNat) return finish(a, "push", 1);
         if (pNat) return finish(a, "natural", BJ_PAY.natural);
-        return finish(a, "lose", 1);
+        return finish(a, "lose", 0);
       }
       return { game, action, done: false, active: activeView(a) };
     }
@@ -260,7 +274,7 @@ function handle(p, day, msg, rand = Math.random) {
     if (action === "hit") {
       a.player.push(drawCard(rand));
       const t = handTotal(a.player);
-      if (t > 21) return finish(a, "bust", 1);
+      if (t > 21) return finish(a, "bust", 0);
       if (t === 21) return dealerPlay(a);
       return { game, action, done: false, active: activeView(a) };
     }
@@ -273,7 +287,7 @@ function handle(p, day, msg, rand = Math.random) {
       const dt = handTotal(a.dealer);
       if (dt > 21 || pt > dt) return finish(a, "win", BJ_PAY.win);
       if (pt === dt) return finish(a, "push", 1);
-      return finish(a, "lose", 1);
+      return finish(a, "lose", 0);
     }
   }
 
@@ -300,7 +314,7 @@ function handle(p, day, msg, rand = Math.random) {
       s.active = null;
       const elapsed = Date.now() - a.startedAt;
       const hits = Array.isArray(msg.hits) ? msg.hits.slice(0, 64).map(Number).filter((x) => Number.isFinite(x)) : [];
-      // 너무 빨리 제출하면(끝까지 안 기다리면) 무효 → ×1.0
+      // 너무 빨리 제출하면(끝까지 안 기다리면) 무효 → ×0
       const valid = elapsed >= a.duration - 1500;
       const used = new Set();
       let score = 0;
@@ -321,7 +335,7 @@ function handle(p, day, msg, rand = Math.random) {
       // 헛손질(노트 없는 곳을 누른 것)은 개당 0.25점 감점 → 연타로 점수 올리기 방지
       const extra = Math.max(0, hits.length - used.size);
       const acc = valid ? Math.max(0, Math.min(1, (score - extra * 0.25) / a.notes.length)) : 0;
-      const mult = 1 + RHYTHM.maxMult * Math.pow(acc, 3);
+      const mult = valid ? RHYTHM.base + RHYTHM.gain * acc * acc : 0;
       return { game, action, done: true, acc: Math.round(acc * 100), judges, stake: a.stake, ...payout(p, a.stake, mult) };
     }
     return { error: "알 수 없는 동작" };
@@ -339,4 +353,4 @@ function settle(p) {
   return { game: a.game, stake: a.stake, ...payout(p, a.stake, mult) };
 }
 
-module.exports = { CASINO, GAMES, handle, settle, publicState, state, handTotal, RHYTHM, HILO_STEPS, SLOT_SYMBOLS };
+module.exports = { CASINO, GAMES, handle, settle, refund, publicState, state, handTotal, RHYTHM, HILO_STEPS, SLOT_SYMBOLS };

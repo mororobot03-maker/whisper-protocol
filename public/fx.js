@@ -375,8 +375,45 @@ function caption(text, tone) {
   replay.sub.className = "replay-sub " + (tone || "");
 }
 
+// 능력 방해: 가운데 해치에서 그림자가 올라오다가 화면이 지지직 깨지며 도로 가라앉음
+//  어느 방으로도 가지 않음 → 누가 누구에게 능력을 쓰려 했는지는 드러나지 않음
+async function playJam(item) {
+  camClock += 9 + Math.floor(Math.random() * 20);
+  camHead("신호 이상");
+  const w = map.walker;
+  const center = posIn(map.hatch);
+  caption("가운데 해치에서 그림자가 올라온다…", "");
+  w.className = "mwalker attacker";
+  w.style.transition = "none";
+  place(w, center);
+  w.getBoundingClientRect();
+  w.style.transition = "";
+  map.hatch.className = "hatch open attacker";
+  w.classList.add("rise");
+  await sleep(900);
+  // 방해: 지지직
+  map.el.classList.add("jammed");
+  w.classList.add("glitch");
+  sound.play("whisper");
+  sound.play("error", 180);
+  burst("jam-label", "⚡ JAMMED", { x: center.x, y: center.y - 46 }, [
+    { transform: "translate(-50%,-50%) scale(1.4)", opacity: 0 },
+    { transform: "translate(-50%,-50%) scale(1)", opacity: 1, offset: 0.2 },
+    { transform: "translate(-50%,-50%) scale(1)", opacity: 1, offset: 0.8 },
+    { transform: "translate(-50%,-50%) scale(0.9)", opacity: 0 },
+  ], 1600).catch(() => {});
+  caption(item.text, "bad");
+  await sleep(1600);
+  w.classList.remove("rise", "glitch");
+  await sleep(400);
+  map.el.classList.remove("jammed");
+  map.hatch.className = "hatch";
+  await sleep(900);
+}
+
 // 사건 하나 재생: 방문 → 공격(또는 치료) → 방어·회복 → 결과 순서로 천천히
 async function playEvent(item) {
+  if (item.type === "jammed") return playJam(item);
   const room = roomOf(item.name);
   if (!room) return sleep(1600);
   const at = posIn(room);
@@ -522,7 +559,7 @@ async function playSequence(sequence, mode, delay) {
 function stopSequence() {
   playId++;
   closeReplay();
-  map.el.classList.remove("alarm", "verdict", "death-flash");
+  map.el.classList.remove("alarm", "verdict", "death-flash", "jammed");
   map.walker.className = "mwalker";
   map.hatch.className = "hatch";
   map.fx.innerHTML = "";
@@ -658,7 +695,7 @@ function showResult(data, isHost) {
   document.querySelector("#result-me").className = "result-me " + (data.won ? "won" : "lost");
   document.querySelector("#result-headline").textContent = data.headline;
   document.querySelector("#result-reason").textContent = data.reason;
-  document.querySelector("#result-note").textContent = isHost ? "" : "방장이 다음 게임을 고르는 중입니다.";
+  document.querySelector("#result-note").textContent = "방은 이미 로비로 돌아갔어요. 확인이 끝나면 로비로 가세요.";
 
   // 승리한 사람을 위로, 팀 색과 직업 공개
   const list = document.querySelector("#result-list");
@@ -674,10 +711,6 @@ function showResult(data, isHost) {
     rl.append(roleIcon(r.roleId), " " + r.role);
     li.appendChild(rl);
     list.appendChild(li);
-  }
-
-  for (const btn of ["#restart-btn", "#to-lobby-btn"]) {
-    document.querySelector(btn).classList.toggle("hidden", !isHost);
   }
 
   // 축하 종이가루: 이긴 팀 색으로

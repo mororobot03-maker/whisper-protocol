@@ -987,18 +987,20 @@ transferBtn.addEventListener("click", () => {
 meRole.addEventListener("click", () => setTab("info"));
 
 // 결과 화면 버튼
-document.querySelector("#restart-btn").addEventListener("click", () => socket.emit("restart"));
-document.querySelector("#to-lobby-btn").addEventListener("click", () => socket.emit("backToLobby"));
-document.querySelector("#leave-btn").addEventListener("click", () => location.reload()); // 새로고침 = 접속 끊고 첫 화면
+// 게임 결과: 방은 이미 로비로 돌아가 있으니 결과 화면만 닫음
+document.querySelector("#to-lobby-btn").addEventListener("click", () => {
+  sound.play("click");
+  hideResult();
+  updateMusic();
+});
 
 // =====================================================
 //  서버가 보낸 소식 → 화면에 반영
 // =====================================================
 
 socket.on("lobby", (data) => {
-  show("lobby");
-  updateMusic();
-  hideResult();
+  show("lobby"); // 게임이 막 끝났으면 결과 화면이 그 위에 떠 있음 (버튼을 누르면 닫힘)
+  if (document.querySelector("#result").classList.contains("hidden")) updateMusic();
   hideIntro();
   stopSequence();
   const isHost = data.hostId === socket.id;
@@ -1366,6 +1368,9 @@ socket.on("chat", (msg) => {
   if (msg.channel === "group") mapSay(msg.from, msg.text); // 낮 그룹 채팅: 원형 지도 위 말풍선
   sound.play(msg.channel === "wiretap" ? "whisper" : mine ? "msgOut" : "msgIn");
 });
+
+// 경매가 길어져 밤이 늘어나면 서버가 남은 시간을 다시 알려 줌
+socket.on("timer", (seconds) => startTimer(seconds));
 
 socket.on("errorMsg", (msg) => {
   sound.play("error");
@@ -1837,7 +1842,7 @@ function drawDex() {
     }
   } else if (dexTab === "casino") {
     const c = catalog.rules.casino;
-    dexBody.appendChild(make("p", "dex-note", "낮에만 열림 · 하루 " + c.playsPerDay + "판 · 판돈 " + c.minBet + " ~ " + c.maxBet + "만. 져도 판돈은 그대로 돌려받아요."));
+    dexBody.appendChild(make("p", "dex-note", "낮에만 열림 · 하루 " + c.playsPerDay + "판 · 판돈 " + c.minBet + " ~ " + c.maxBet + "만. 지면 판돈을 잃지만, 그날 순손실의 " + Math.round(c.refundRate * 100) + "%는 다음 날 낮에 돌려받아요."));
     for (const id in catalog.casino) {
       const g = catalog.casino[id];
       dexBody.appendChild(dexCard(make("span", "dex-ico cg", GAME_ICONS[id] || "★"), g.name, null, g.odds, "item"));
@@ -1850,7 +1855,10 @@ function drawDex() {
       ["투표", "최다 득표자는 비행선 밖으로. 동점이면 없음. 모두 투표하면 바로 마감."],
       ["체력", "VIP 3, 나머지 2. 부상이어도 능력·아이템은 그대로 사용 가능."],
       ["신디케이트", "밤마다 공격 투표 또는 특수 능력 중 하나. 표가 갈리면 50% 확률로만 공격."],
-      ["보디가드", "막아내면 경호 보수 +" + catalog.rules.bodyguardReward + "만."],
+      ["경호원", "자신 말고 1명 경호. 막아내면 아무도 안 다치고 경호 보수 +" + catalog.rules.bodyguardReward + "만."],
+      ["카지노", "지면 판돈을 잃음. 그날 순손실의 절반은 다음 날 낮에 반환 (그 전에 죽으면 없음)."],
+      ["경매 연장", "입찰이 들어오면 남은 시간이 최소 10초로 되돌아감. 경매가 길어지면 밤도 그만큼 늘어남."],
+      ["방해", "화이트햇·넷러너에게 방해받으면 아침 CCTV에 \"누군가의 능력이 방해받았다\"가 나옴 (누구인지는 비공개)."],
       ["승리", "시민팀: 신디케이트 전멸 또는 착륙(" + catalog.rules.landingDays + "일차)까지 VIP 생존. 신디케이트: VIP 사망 또는 시민팀에 VIP 혼자 남음. 제3세력은 각자 조건."],
     ];
     for (const [t, d] of rows) dexBody.appendChild(dexCard(null, t, null, d, "rule"));
